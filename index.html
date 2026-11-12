@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MultiRiskᴬᴵ: FireWatch</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <aside>
+            <div class="brand">
+                <div class="brand-mark"></div>
+                <div>
+                    <h1>MultiRiskᴬᴵ: FireWatch</h1>
+                </div>
+            </div>
+            
+            <h2>Área de análisis</h2>
+            <p>En base a las herramientas de dibujo en el mapa, selecciona una región.</p>
+            <div class="status">
+                <span class="dot"></span>
+                Mapa interactivo listo.
+            </div>
+            
+            <h2>Coordenadas</h2>
+            <div class="data-card">
+                <div class="data-label">
+                    Limites (Oeste, Sur, Este, Oeste)
+                </div>
+                <div id="bounds" class="data-value empty">
+                    Todavía no hay un area seleccionada
+                </div>
+            </div>
+            <div class="data-card">
+                <div class="data-label">
+                    Geometría Seleccionada
+                </div>
+                <div id="geometry" class="data-value empty">
+                    Dibujá un área en el mapa
+                </div>
+            </div>
+            <div class="actions">
+                <button id="copy" class="primary" disabled> Copiar coordenadas</button>
+                <button id="clear" disabled>Limpiar</button>
+            </div>
+        </aside>
+
+        <main>
+            <div class="topbar">
+                <strong>Mapa Mundial</strong>
+                <span>Selecciona una región para comenzar el análisis</span>
+            </div>
+
+            <div id="map" aria-label="Mapa Mundial interactivo"></div>
+        </main>
+    </div>
+
+    <!--Scripts y librerias-->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
