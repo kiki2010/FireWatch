@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/getFirmsData.js": {
+      "maxDuration": 60
+    }
+  }
+}
