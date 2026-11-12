@@ -95,6 +95,41 @@
                     Limpiar detecciones
                 </button>
             </div>
+
+            <h2>Análisis histórico</h2>
+            <div class="firms-controls">
+                <label for="startDate">Fecha inicio</label>
+                <input type="date" id="startDate" value="2022-07-01">
+
+                <label for="endDate">Fecha fin</label>
+                <input type="date" id="endDate" value="2024-11-30">
+
+                <button id="analyzeBtn" class="primary" disabled>Analizar período</button>
+            </div>
+
+            <div class="data-card">
+                <div class="data-label">Estado del análisis</div>
+                <div id="analysisStatus" class="data-value empty">Esperando un área seleccionada</div>
+            </div>
+
+            <div id="analysisResults"></div>
+
+            <h2>Comparar sensores</h2>
+            <div class="firms-controls">
+                <label for="sensorB">Sensor B (se compara contra el sensor de arriba)</label>
+                <select id="sensorB">
+                    <option value="MODIS_NRT" selected>MODIS · Terra + Aqua</option>
+                    <option value="VIIRS_SNPP_NRT">VIIRS SNPP</option>
+                    <option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20</option>
+                    <option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21</option>
+                </select>
+                <button id="compareBtn" class="primary" disabled>Comparar sensores</button>
+            </div>
+
+            <div class="data-card">
+                <div class="data-label">Resultado de la comparación</div>
+                <div id="compareResults" class="data-value empty">Esperando un área seleccionada</div>
+            </div>
         </aside>
 
         <main>
@@ -110,6 +145,7 @@
     <!--Scripts y librerias-->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-    <script src="script.js"></script>
+    <script src="scripts/script.js"></script>
+    <script src="scripts/harmonize.js"></script>
 </body>
 </html>

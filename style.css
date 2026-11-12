@@ -236,3 +236,22 @@ main {
     background: #dc2626;
     box-shadow: 0 0 10px #dc2626, 0 0 20px #dc2626aa;
 }
+
+.firms-controls input[type="date"] {
+    width: 100%;
+    padding: 11px;
+    color: var(--text);
+    background: #0d1727;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font-size: 12px;
+}
+
+#analysisResults { overflow-x: auto; margin-top: 10px; }
+
+.result-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.result-table th, .result-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+.result-table th:first-child, .result-table td:first-child { text-align: left; }
+.result-table th { color: var(--muted); font-weight: 600; }
+.z-pos { color: #fb923c; }
+.z-neg { color: #60a5fa; }
