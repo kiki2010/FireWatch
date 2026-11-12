@@ -53,6 +53,8 @@ map.addControl(drawControl);
 // Referencias HTML
 let selectedPayload = null;
 let lastDetections = [];
+let lastDaily = [];
+let lastMonthly = [];
 
 const boundsEl = document.getElementById('bounds');
 const geometryEl = document.getElementById('geometry');
@@ -69,11 +71,31 @@ const clearFirmsBtn = document.getElementById('clearFirms');
 const firmsStatus = document.getElementById('firmsStatus');
 const firmsCount = document.getElementById('firmsCount');
 
+// Análisis histórico
+const startDateEl = document.getElementById('startDate');
+const endDateEl = document.getElementById('endDate');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const analysisStatus = document.getElementById('analysisStatus');
+const analysisResults = document.getElementById('analysisResults');
+
+const sensorBSelect = document.getElementById('sensorB');
+const compareBtn = document.getElementById('compareBtn');
+const compareResults = document.getElementById('compareResults');
+
 const FIRMS_FUNCTION_URL = 'http://127.0.0.1:5001/mr-firewatch/us-central1/getFirmsData';
 
 //Funciones de selección geográfica
 function rounded(value) {
     return Number(value.toFixed(5));
+}
+
+function clearAnalysis() {
+    lastDaily = [];
+    lastMonthly = [];
+    analysisResults.innerHTML = '';
+    analysisStatus.textContent = selectedPayload
+        ? 'Área lista para analizar'
+        : 'Esperando un área seleccionada';
 }
 
 function updateSelection(layer) {
@@ -104,9 +126,12 @@ function updateSelection(layer) {
     copyBtn.disabled = false;
     clearBtn.disabled = false;
     queryFirmsBtn.disabled = false;
+    analyzeBtn.disabled = false;
+    compareBtn.disabled = false;
 
     //evitar mostrar resultados de una selección anterior
     clearFirmsData();
+    clearAnalysis();
 
     firmsStatus.textContent = 'Área lista para consultar Nasa FIRMS';
 }
@@ -124,10 +149,13 @@ function resetSelection() {
     copyBtn.disabled = true;
     clearBtn.disabled = true;
     queryFirmsBtn.disabled = true;
+    analyzeBtn.disabled = true;
+    compareBtn.disabled = true;
 
     clearFirmsData();
+    clearAnalysis();
 
-    firmsStatus.textContent = 'Esperando un área seleccionada'
+    firmsStatus.textContent = 'Esperando un área seleccionada';
 }
 
 //Elementos de Leaflet.draw
@@ -168,15 +196,6 @@ copyBtn.addEventListener('click', async () => {
 
 clearBtn.addEventListener('click', resetSelection);
 
-// Corregir dimensiones de Leaflet después de cargar el diseño
-window.addEventListener('load', () => {
-    setTimeout(() => map.invalidateSize(), 250);
-});
-
-window.addEventListener('resize', () => {
-    map.invalidateSize();
-});
-
 //Limpiar Detecciones
 function clearFirmsData() {
     lastDetections = [];
@@ -204,7 +223,7 @@ function parseCSV(csv) {
         const result = [];
         let current = '';
         let insideQuotes = false;
-      
+
         for (let i = 0; i < line.length; i++) {
             const char = line[i];
 
@@ -294,7 +313,7 @@ function normalizeDetection(raw, sensor) {
         satellite: raw.satellite ?? '',
         instrument: raw.instrument ?? (isModis ? 'MODIS' : 'VIIRS'),
         daynight: raw.daynight ?? '',
-        sensor                                        // producto consultado, ej. VIIRS_SNPP_NRT
+        sensor                                        // producto consultado, ej. VIIRS_SNPP_SP
     };
 }
 
@@ -324,7 +343,20 @@ function buildChunks(startDate, endDate, size = 5) {
     return chunks;
 }
 
+// NRT solo guarda los últimos meses. Para fechas más viejas hay que usar SP.
+const NRT_WINDOW_DAYS = 60; // margen conservador
+
+function productForDate(sensor, isoDate) {
+    if (!sensor.endsWith('_NRT')) return sensor;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const ageDays = daysBetween(isoDate, today);
+    return ageDays > NRT_WINDOW_DAYS ? sensor.replace('_NRT', '_SP') : sensor;
+}
+
 async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
+    const product = productForDate(sensor, chunk.startDate);
+
     for (let attempt = 0; ; attempt++) {
         try {
             const response = await fetch(FIRMS_FUNCTION_URL, {
@@ -332,7 +364,7 @@ async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     bounds,
-                    sensor,
+                    sensor: product,
                     dayRange: chunk.dayRange,
                     startDate: chunk.startDate
                 })
@@ -345,7 +377,7 @@ async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
             }
 
             return parseCSV(result.csv || '')
-                .map(item => normalizeDetection(item, sensor))
+                .map(item => normalizeDetection(item, product))
                 .filter(Boolean);
 
         } catch (error) {
@@ -417,7 +449,7 @@ function pointInRing(point, ring) {
         if (intersects) inside = !inside;
     }
 
-    return inside
+    return inside;
 }
 
 //Comprobar puntos dentro de polígonos, incluidos sus huecos.
@@ -503,7 +535,7 @@ function createHotspotMarker(item) {
     return L.marker([item.lat, item.lng], { icon }).bindPopup(popup);
 }
 
-//Consultar NASA FIRMS
+//Consultar NASA FIRMS (consulta simple, últimos 1-5 días)
 queryFirmsBtn.addEventListener('click', async () => {
     if (!selectedPayload) {
         firmsStatus.textContent = 'Primero seleccioná un área en el mapa';
@@ -556,11 +588,7 @@ queryFirmsBtn.addEventListener('click', async () => {
 
         // Dibujar detecciones.
         filteredDetections.forEach(item => {
-            const marker = createHotspotMarker(item);
-
-            if (marker) {
-                hotspotLayer.addLayer(marker);
-            }
+            hotspotLayer.addLayer(createHotspotMarker(item));
         });
 
         firmsCount.textContent = filteredDetections.length;
@@ -586,7 +614,155 @@ queryFirmsBtn.addEventListener('click', async () => {
     }
 });
 
-//Ajustar Mapa
+// ===== Análisis histórico (Harmonization Engine) =====
+function renderMonthlyTable(rows) {
+    if (rows.length === 0) {
+        analysisResults.innerHTML =
+            '<p>No hay meses completos en el rango elegido.</p>';
+        return;
+    }
+
+    const body = rows.map(r => {
+        const z = r.zscore === null ? '—' : r.zscore.toFixed(2);
+        const zClass = r.zscore === null ? '' : r.zscore > 0 ? 'z-pos' : 'z-neg';
+        return `<tr>
+            <td>${escapeHTML(r.month)}</td>
+            <td>${r.count}</td>
+            <td>${Math.round(r.baseline)}</td>
+            <td>${Math.round(r.anomaly)}</td>
+            <td class="${zClass}">${z}</td>
+            <td>${r.n}</td>
+        </tr>`;
+    }).join('');
+
+    analysisResults.innerHTML = `
+        <table class="result-table">
+            <thead><tr>
+                <th>Mes</th><th>Focos</th><th>Prom.</th><th>Anom.</th><th>Z</th><th>n</th>
+            </tr></thead>
+            <tbody>${body}</tbody>
+        </table>`;
+}
+
+analyzeBtn.addEventListener('click', async () => {
+    if (!selectedPayload) {
+        analysisStatus.textContent = 'Primero seleccioná un área en el mapa';
+        return;
+    }
+
+    const startDate = startDateEl.value;
+    const endDate = endDateEl.value;
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (!startDate || !endDate || startDate > endDate || endDate > today) {
+        analysisStatus.textContent = 'Revisá las fechas: inicio ≤ fin ≤ hoy';
+        return;
+    }
+
+    const sensor = sensorSelect.value;
+    analyzeBtn.disabled = true;
+    analysisResults.innerHTML = '';
+
+    try {
+        const detections = await fetchFirmsRange({
+            bounds: selectedPayload.bounds,
+            geometry: selectedPayload.geometry,
+            sensor,
+            startDate,
+            endDate,
+            onProgress: (done, total) => {
+                analysisStatus.textContent = `Descargando tramo ${done} de ${total}...`;
+            }
+        });
+
+        if (detections.length === 0) {
+            analysisStatus.textContent =
+                'Sin detecciones. Puede que el producto no cubra esas fechas (¿NRT vs SP?) o que el área no tenga focos.';
+            return;
+        }
+
+        lastDaily = aggregateDaily(detections, startDate, endDate);
+        lastMonthly = aggregateMonthly(lastDaily);
+        const anomalies = seasonalAnomalies(lastMonthly);
+
+        renderMonthlyTable(anomalies);
+        analysisStatus.textContent =
+            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ${sensor}`;
+
+    } catch (error) {
+        console.error('Error en análisis:', error);
+        analysisStatus.textContent = `Error: ${error.message}`;
+    } finally {
+        analyzeBtn.disabled = !selectedPayload;
+    }
+});
+
+// ===== Comparación de sensores =====
+compareBtn.addEventListener('click', async () => {
+    if (!selectedPayload) return;
+
+    const startDate = startDateEl.value;
+    const endDate = endDateEl.value;
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (!startDate || !endDate || startDate > endDate || endDate > today) {
+        compareResults.textContent = 'Revisá las fechas: inicio ≤ fin ≤ hoy';
+        return;
+    }
+
+    const sensorA = sensorSelect.value;
+    const sensorB = sensorBSelect.value;
+
+    if (sensorA === sensorB) {
+        compareResults.textContent = 'Elegí dos sensores distintos (A arriba, B acá).';
+        return;
+    }
+
+    compareBtn.disabled = true;
+    compareResults.classList.remove('empty');
+
+    // Se descargan en secuencia para no acercarse al límite de FIRMS.
+    const loadDaily = async (sensor, label) => {
+        const detections = await fetchFirmsRange({
+            bounds: selectedPayload.bounds,
+            geometry: selectedPayload.geometry,
+            sensor,
+            startDate,
+            endDate,
+            onProgress: (done, total) => {
+                compareResults.textContent = `${label}: tramo ${done} de ${total}...`;
+            }
+        });
+        return aggregateDaily(detections, startDate, endDate);
+    };
+
+    try {
+        const dailyA = await loadDaily(sensorA, `A (${sensorA})`);
+        const dailyB = await loadDaily(sensorB, `B (${sensorB})`);
+
+        const cmp = compareSensors(dailyA, dailyB);
+        const zeros = coincidentZeroDays(dailyA, dailyB);
+
+        const fmt = (v, d = 2) => v === null ? 'N/D' : v.toFixed(d);
+
+        compareResults.innerHTML = `
+            <b>A:</b> ${escapeHTML(sensorA)} · <b>B:</b> ${escapeHTML(sensorB)}<br>
+            <b>Días:</b> ${cmp.days}<br>
+            <b>Focos A:</b> ${cmp.totalA} · <b>Focos B:</b> ${cmp.totalB}<br>
+            <b>Ratio A/B:</b> ${fmt(cmp.ratioAB)}<br>
+            <b>Correlación diaria (Pearson):</b> ${fmt(cmp.correlation)}<br>
+            <b>Días con cero focos en ambos:</b> ${zeros.length}
+              (${(100 * zeros.length / cmp.days).toFixed(1)}%)
+        `;
+    } catch (error) {
+        console.error('Error en comparación:', error);
+        compareResults.textContent = `Error: ${error.message}`;
+    } finally {
+        compareBtn.disabled = !selectedPayload;
+    }
+});
+
+// Ajustar mapa (una sola vez)
 window.addEventListener('load', () => {
     setTimeout(() => map.invalidateSize(), 250);
 });
