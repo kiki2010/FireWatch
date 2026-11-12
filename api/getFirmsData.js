@@ -32,15 +32,17 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 function applyCors(req, res) {
-  const origin = req.headers.origin;
+    const origin = req.headers.origin;
 
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Max-Age", "86400");
-  }
+    if (!origin) return;
+
+    if (ALLOWED_ORIGINS.has(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+        res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+        res.setHeader("Access-Control-Max-Age", "86400");
+    }
 }
 
 module.exports = async function handler(req, res) {
