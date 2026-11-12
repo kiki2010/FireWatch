@@ -82,8 +82,6 @@ const sensorBSelect = document.getElementById('sensorB');
 const compareBtn = document.getElementById('compareBtn');
 const compareResults = document.getElementById('compareResults');
 
-const FIRMS_FUNCTION_URL = 'http://127.0.0.1:5001/mr-firewatch/us-central1/getFirmsData';
-
 //Funciones de selección geográfica
 function rounded(value) {
     return Number(value.toFixed(5));
@@ -315,19 +313,6 @@ function normalizeDetection(raw, sensor) {
         daynight: raw.daynight ?? '',
         sensor                                        // producto consultado, ej. VIIRS_SNPP_SP
     };
-}
-
-// Consulta histórica por tramos de 5 días
-function addDaysISO(iso, n) {
-    const d = new Date(`${iso}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-}
-
-function daysBetween(a, b) {
-    return Math.round(
-        (new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000
-    );
 }
 
 function buildChunks(startDate, endDate, size = 5) {
