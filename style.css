@@ -180,3 +180,59 @@ main {
         flex-direction: column;
     }
 }
+
+.firms-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin-top: 14px;
+}
+
+.firms-controls label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .7px;
+}
+
+.firms-controls select {
+    width: 100%;
+    padding: 11px;
+    color: var(--text);
+    background: #0d1727;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font-size: 12px;
+}
+
+#queryFirms {
+    margin-top: 5px;
+    width: 100%;
+}
+
+#clearFirms {
+    width: 100%;
+}
+
+#firmsStatus {
+    overflow-wrap: anywhere;
+}
+
+.hotspot-marker {
+    width: 13px;
+    height: 13px;
+    background: #ef4444;
+    border: 2px solid #fff1;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #ef4444, 0 0 18px #ef444488;
+}
+
+.hotspot-marker.high {
+    background: #f97316;
+    box-shadow: 0 0 10px #f97316, 0 0 18px #f9731688;
+}
+
+.hotspot-marker.extreme {
+    background: #dc2626;
+    box-shadow: 0 0 10px #dc2626, 0 0 20px #dc2626aa;
+}
