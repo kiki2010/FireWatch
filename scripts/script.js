@@ -82,6 +82,9 @@ const sensorBSelect = document.getElementById('sensorB');
 const compareBtn = document.getElementById('compareBtn');
 const compareResults = document.getElementById('compareResults');
 
+// FIRMS_FUNCTION_URL se define en config.js (cargado antes que este archivo).
+// addDaysISO / daysBetween / resolveRange se definen en harmonize.js.
+
 //Funciones de selección geográfica
 function rounded(value) {
     return Number(value.toFixed(5));
@@ -315,6 +318,7 @@ function normalizeDetection(raw, sensor) {
     };
 }
 
+// Consulta histórica por tramos de 5 días
 function buildChunks(startDate, endDate, size = 5) {
     const chunks = [];
     let cursor = startDate;
@@ -645,6 +649,14 @@ analyzeBtn.addEventListener('click', async () => {
     }
 
     const sensor = sensorSelect.value;
+
+    // Recorta el inicio al día en que el sensor ya existía.
+    const range = resolveRange([sensor], startDate, endDate);
+    if (range.error) {
+        analysisStatus.textContent = range.error;
+        return;
+    }
+
     analyzeBtn.disabled = true;
     analysisResults.innerHTML = '';
 
@@ -653,7 +665,7 @@ analyzeBtn.addEventListener('click', async () => {
             bounds: selectedPayload.bounds,
             geometry: selectedPayload.geometry,
             sensor,
-            startDate,
+            startDate: range.startDate,
             endDate,
             onProgress: (done, total) => {
                 analysisStatus.textContent = `Descargando tramo ${done} de ${total}...`;
@@ -666,13 +678,17 @@ analyzeBtn.addEventListener('click', async () => {
             return;
         }
 
-        lastDaily = aggregateDaily(detections, startDate, endDate);
+        lastDaily = aggregateDaily(detections, range.startDate, endDate);
         lastMonthly = aggregateMonthly(lastDaily);
         const anomalies = seasonalAnomalies(lastMonthly);
 
         renderMonthlyTable(anomalies);
+
+        const withZ = countWithZScore(anomalies);
         analysisStatus.textContent =
-            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ${sensor}`;
+            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ${describeSensor(sensor)}` +
+            (range.notes.length ? ' · ' + range.notes.join(' ') : '') +
+            (withZ === 0 ? ' · Sin Z: se necesitan ≥3 años del mismo mes.' : '');
 
     } catch (error) {
         console.error('Error en análisis:', error);
@@ -703,6 +719,14 @@ compareBtn.addEventListener('click', async () => {
         return;
     }
 
+    // Período en el que AMBOS sensores existen.
+    const range = resolveRange([sensorA, sensorB], startDate, endDate);
+    if (range.error) {
+        compareResults.classList.remove('empty');
+        compareResults.textContent = range.error;
+        return;
+    }
+
     compareBtn.disabled = true;
     compareResults.classList.remove('empty');
 
@@ -712,13 +736,13 @@ compareBtn.addEventListener('click', async () => {
             bounds: selectedPayload.bounds,
             geometry: selectedPayload.geometry,
             sensor,
-            startDate,
+            startDate: range.startDate,
             endDate,
             onProgress: (done, total) => {
                 compareResults.textContent = `${label}: tramo ${done} de ${total}...`;
             }
         });
-        return aggregateDaily(detections, startDate, endDate);
+        return aggregateDaily(detections, range.startDate, endDate);
     };
 
     try {
@@ -731,13 +755,16 @@ compareBtn.addEventListener('click', async () => {
         const fmt = (v, d = 2) => v === null ? 'N/D' : v.toFixed(d);
 
         compareResults.innerHTML = `
-            <b>A:</b> ${escapeHTML(sensorA)} · <b>B:</b> ${escapeHTML(sensorB)}<br>
+            <b>A:</b> ${escapeHTML(describeSensor(sensorA))}<br>
+            <b>B:</b> ${escapeHTML(describeSensor(sensorB))}<br>
+            <b>Período:</b> ${escapeHTML(range.startDate)} → ${escapeHTML(endDate)}<br>
             <b>Días:</b> ${cmp.days}<br>
             <b>Focos A:</b> ${cmp.totalA} · <b>Focos B:</b> ${cmp.totalB}<br>
             <b>Ratio A/B:</b> ${fmt(cmp.ratioAB)}<br>
             <b>Correlación diaria (Pearson):</b> ${fmt(cmp.correlation)}<br>
             <b>Días con cero focos en ambos:</b> ${zeros.length}
               (${(100 * zeros.length / cmp.days).toFixed(1)}%)
+            ${range.notes.length ? '<br><i>' + range.notes.map(escapeHTML).join('<br>') + '</i>' : ''}
         `;
     } catch (error) {
         console.error('Error en comparación:', error);
