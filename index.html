@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MultiRiskᴬᴵ: FireWatch</title>
-    <link rel="stylesheet" href="style.css">
 
+    <link rel="icon" href="assets/icon.png">
+    <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 </head>
@@ -123,6 +124,15 @@
                     <option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20</option>
                     <option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21</option>
                 </select>
+
+                <label for="neighborRadius">Tolerancia espacial</label>
+                <select id="neighborRadius">
+                    <option value="0">Celda exacta</option>
+                    <option value="1" selected>Celdas vecinas (3×3)</option>
+                </select>
+
+                <label><input type="checkbox" id="filterStatic" checked> Excluir fuentes de calor persistentes</label>
+
                 <button id="compareBtn" class="primary" disabled>Comparar sensores</button>
             </div>
 
@@ -130,6 +140,36 @@
                 <div class="data-label">Resultado de la comparación</div>
                 <div id="compareResults" class="data-value empty">Esperando un área seleccionada</div>
             </div>
+
+            <!-- Validación: sensibilidad al tamaño de celda + control de azar -->
+            <div class="actions">
+                <button id="validateBtn" class="primary" disabled>Validar comparación (sensibilidad + azar)</button>
+            </div>
+
+            <div class="data-card">
+                <div class="data-label">Validación</div>
+                <div id="validateResults" class="data-value empty">Ejecutá una comparación primero</div>
+            </div>
+
+            <h2>Celdas armonizadas</h2>
+            <div class="firms-controls">
+                <label><input type="checkbox" id="showCells" checked> Mostrar celdas comparadas</label>
+                <label><input type="checkbox" id="showHotspots" checked> Mostrar detecciones originales</label>
+
+                <label for="cellDate">Fecha a visualizar</label>
+                <div class="actions">
+                    <button id="cellPrev" type="button" disabled>◀</button>
+                    <select id="cellDate" disabled></select>
+                    <button id="cellNext" type="button" disabled>▶</button>
+                </div>
+            </div>
+
+            <div class="data-card">
+                <div class="data-label">Resumen de la fecha</div>
+                <div id="cellSummary" class="data-value empty">Ejecutá una comparación para ver las celdas</div>
+            </div>
+
+            <div id="cellLegend"></div>
         </aside>
 
         <main>
