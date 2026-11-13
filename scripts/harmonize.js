@@ -243,3 +243,124 @@ function coincidentZeroDays(dailyA, dailyB) {
         .filter((d, i) => d.count === 0 && dailyB[i].count === 0)
         .map(d => d.date);
 }
+
+
+/**
+ * Agrupa detecciones por día y celda espacial.
+ *
+ * IMPORTANTE:
+ * - Es una primera armonización espacial aproximada.
+ * - Conserva las detecciones originales.
+ * - No convierte conteos MODIS y VIIRS en mediciones equivalentes.
+ *
+ * @param {Array} detections Detecciones normalizadas de NASA FIRMS.
+ * @param {number} referenceLat Latitud central del área de estudio.
+ * @param {number} cellSizeKm Tamaño de celda en kilómetros.
+ */
+function harmonizeDetections(
+    detections,
+    referenceLat,
+    cellSizeKm = 1
+) {
+    if (!Array.isArray(detections)) {
+        throw new TypeError('detections debe ser un array');
+    }
+
+    if (!Number.isFinite(referenceLat) || Math.abs(referenceLat) >= 90) {
+        throw new RangeError('referenceLat debe ser una latitud válida');
+    }
+
+    if (!Number.isFinite(cellSizeKm) || cellSizeKm <= 0) {
+        throw new RangeError('cellSizeKm debe ser mayor que cero');
+    }
+
+    const groups = new Map();
+
+    // Aproximación local de grados a kilómetros.
+    const kmPerDegreeLat = 110.574;
+    const kmPerDegreeLng =
+        111.320 * Math.cos(referenceLat * Math.PI / 180);
+
+    for (const detection of detections) {
+        if (
+            !Number.isFinite(detection.lat) ||
+            !Number.isFinite(detection.lng) ||
+            !detection.date
+        ) {
+            continue;
+        }
+
+        // Coordenadas aproximadas en kilómetros.
+        const x = detection.lng * kmPerDegreeLng;
+        const y = detection.lat * kmPerDegreeLat;
+
+        const cellX = Math.floor(x / cellSizeKm);
+        const cellY = Math.floor(y / cellSizeKm);
+
+        const key = `${detection.date}_${cellX}_${cellY}`;
+
+        let group = groups.get(key);
+
+        if (!group) {
+            group = {
+                date: detection.date,
+                cellId: `${cellX}_${cellY}`,
+                cellX,
+                cellY,
+                totalDetections: 0,
+                bySensor: {},
+                byInstrument: {},
+                frpSum: 0,
+                frpMax: 0,
+                frpCount: 0,
+                highConfidence: 0,
+                detections: []
+            };
+
+            groups.set(key, group);
+        }
+
+        group.totalDetections++;
+
+        const sensor = detection.sensor || 'UNKNOWN';
+        const instrument = detection.instrument || 'UNKNOWN';
+
+        group.bySensor[sensor] =
+            (group.bySensor[sensor] || 0) + 1;
+
+        group.byInstrument[instrument] =
+            (group.byInstrument[instrument] || 0) + 1;
+
+        if (Number.isFinite(detection.frp)) {
+            group.frpSum += detection.frp;
+            group.frpMax = Math.max(group.frpMax, detection.frp);
+            group.frpCount++;
+        }
+
+        if (detection.confidenceLevel === 'high') {
+            group.highConfidence++;
+        }
+
+        // Conservamos el registro original para trazabilidad.
+        group.detections.push(detection);
+    }
+
+    return [...groups.values()]
+        .map(group => {
+            const centerX = (group.cellX + 0.5) * cellSizeKm;
+            const centerY = (group.cellY + 0.5) * cellSizeKm;
+
+            return {
+                ...group,
+                centerLat: centerY / kmPerDegreeLat,
+                centerLng: centerX / kmPerDegreeLng,
+                frpMean: group.frpCount
+                    ? group.frpSum / group.frpCount
+                    : null
+            };
+        })
+        .sort((a, b) =>
+            a.date.localeCompare(b.date) ||
+            a.cellId.localeCompare(b.cellId)
+        );
+}
