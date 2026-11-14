@@ -1,0 +1,526 @@
+
+/* =====================================================
+   FIREWATCH · MAIN STYLESHEET
+   Dark theme · Celeste + Amarillo
+   ===================================================== */
+
+:root {
+    color-scheme: dark;
+
+    /* Backgrounds */
+    --bg: #101820;
+    --panel: #17212b;
+    --surface: #1c2934;
+    --surface-hover: #263642;
+
+    /* Borders */
+    --line: #2b3945;
+    --line-hover: #40515f;
+
+    /* Typography */
+    --text: #e6ebef;
+    --muted: #98a6b3;
+    --muted-dark: #82919e;
+
+    /* FireWatch identity */
+    --accent: #55bdeb;
+    --accent-hover: #35a7d8;
+    --accent-soft: #193746;
+
+    --yellow: #f5c84c;
+    --yellow-soft: #38321e;
+
+    /* Status */
+    --success: #54b88a;
+    --warning: #f5c84c;
+    --danger: #ef4444;
+}
+
+/* =====================================================
+   RESET
+   ===================================================== */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+
+    font-family: Inter, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* =====================================================
+   MAIN LAYOUT
+   ===================================================== */
+
+.app {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+
+    height: 100vh;
+    min-height: 0;
+}
+
+/* =====================================================
+   SIDEBAR
+   ===================================================== */
+
+aside {
+    padding: 22px;
+
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+}
+
+/* BRAND */
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    margin-bottom: 30px;
+}
+
+.brand-mark {
+    width: 42px;
+    height: 42px;
+
+    flex-shrink: 0;
+    overflow: hidden;
+
+    border-radius: 9px;
+}
+
+.brand-mark img {
+    width: 100%;
+    height: 100%;
+
+    object-fit: contain;
+    display: block;
+}
+
+h1 {
+    font-size: 17px;
+    font-weight: 650;
+
+    margin: 0;
+    letter-spacing: -.3px;
+}
+
+/* SECTION HEADINGS */
+
+h2 {
+    font-size: 11px;
+    font-weight: 700;
+
+    text-transform: uppercase;
+    letter-spacing: .8px;
+
+    color: var(--muted);
+
+    margin: 27px 0 10px;
+}
+
+p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+/* =====================================================
+   STATUS
+   ===================================================== */
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    color: #80c9a5;
+    font-size: 12px;
+
+    margin-top: 15px;
+}
+
+.dot {
+    width: 7px;
+    height: 7px;
+
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+}
+
+/* =====================================================
+   DATA CARDS
+   ===================================================== */
+
+.data-card {
+    border: 1px solid var(--line);
+    background: var(--surface);
+
+    border-radius: 7px;
+    padding: 12px;
+
+    margin-top: 9px;
+}
+
+.data-label {
+    color: var(--muted);
+
+    font-size: 10px;
+    font-weight: 650;
+
+    text-transform: uppercase;
+    letter-spacing: .6px;
+}
+
+.data-value {
+    font: 12px/1.6 ui-monospace,
+        SFMono-Regular, Menlo, monospace;
+
+    color: var(--text);
+
+    overflow-wrap: anywhere;
+    margin-top: 6px;
+}
+
+.empty {
+    color: var(--muted-dark);
+    font-size: 12px;
+}
+
+/* =====================================================
+   BUTTONS
+   ===================================================== */
+
+.actions {
+    display: flex;
+    gap: 7px;
+
+    margin-top: 12px;
+}
+
+button {
+    border: 1px solid var(--line);
+
+    color: var(--text);
+    background: var(--surface);
+
+    padding: 9px 11px;
+    border-radius: 6px;
+
+    cursor: pointer;
+
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 11px;
+
+    transition:
+        background .15s,
+        border-color .15s,
+        color .15s;
+}
+
+button:hover {
+    background: var(--surface-hover);
+    border-color: var(--line-hover);
+}
+
+button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+
+    color: #10202a;
+}
+
+button.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+}
+
+/* =====================================================
+   FORMS AND CONTROLS
+   ===================================================== */
+
+.firms-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    margin-top: 12px;
+}
+
+.firms-controls label {
+    color: var(--muted);
+
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.firms-controls select,
+.firms-controls input[type="date"] {
+    width: 100%;
+
+    padding: 9px 10px;
+
+    color: var(--text);
+    background: var(--surface);
+
+    border: 1px solid var(--line);
+    border-radius: 6px;
+
+    font-family: inherit;
+    font-size: 12px;
+}
+
+.firms-controls select:hover,
+.firms-controls input[type="date"]:hover {
+    border-color: var(--line-hover);
+}
+
+.firms-controls select:focus,
+.firms-controls input:focus,
+button:focus-visible {
+    outline: 2px solid var(--yellow);
+    outline-offset: 2px;
+}
+
+#queryFirms,
+#clearFirms {
+    width: 100%;
+}
+
+#firmsStatus {
+    overflow-wrap: anywhere;
+}
+
+/* CHECKBOXES AND RADIO */
+
+input[type="checkbox"],
+input[type="radio"] {
+    accent-color: var(--accent);
+}
+
+/* =====================================================
+   ANALYSIS RESULTS
+   ===================================================== */
+
+#analysisResults {
+    overflow-x: auto;
+    margin-top: 10px;
+}
+
+.result-table {
+    width: 100%;
+    border-collapse: collapse;
+
+    font-size: 11px;
+}
+
+.result-table th,
+.result-table td {
+    padding: 7px;
+
+    border-bottom: 1px solid var(--line);
+
+    text-align: right;
+}
+
+.result-table th:first-child,
+.result-table td:first-child {
+    text-align: left;
+}
+
+.result-table th {
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.z-pos {
+    color: var(--yellow);
+}
+
+.z-neg {
+    color: var(--accent);
+}
+
+/* =====================================================
+   MAIN CONTENT
+   ===================================================== */
+
+main {
+    min-width: 0;
+    min-height: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    height: 100%;
+    overflow: hidden;
+}
+
+/* TOPBAR */
+
+.topbar {
+    flex: 0 0 auto;
+
+    padding: 15px 22px;
+
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 12px;
+}
+
+.topbar strong {
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.topbar span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+/* =====================================================
+   MAP
+   ===================================================== */
+
+#map {
+    flex: 1;
+
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+
+    background: var(--bg);
+}
+
+.leaflet-container {
+    font-family: inherit;
+
+    width: 100%;
+    height: 100%;
+}
+
+/* =====================================================
+   HOTSPOTS
+   ===================================================== */
+
+.hotspot-marker {
+    width: 11px;
+    height: 11px;
+
+    background: #ef4444;
+    border: 2px solid rgba(255, 255, 255, .8);
+
+    border-radius: 50%;
+}
+
+.hotspot-marker.high {
+    background: #f97316;
+}
+
+.hotspot-marker.extreme {
+    background: #dc2626;
+}
+
+/* =====================================================
+   HARMONIZED CELLS
+   ===================================================== */
+
+#cellLegend {
+    font-size: 11px;
+}
+
+#cellDate {
+    flex: 1;
+    min-width: 0;
+}
+
+#cellPrev,
+#cellNext {
+    padding: 8px 11px;
+}
+
+/* =====================================================
+   SCROLLBARS
+   ===================================================== */
+
+aside::-webkit-scrollbar {
+    width: 6px;
+}
+
+aside::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+aside::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 10px;
+}
+
+aside::-webkit-scrollbar-thumb:hover {
+    background: var(--line-hover);
+}
+
+/* =====================================================
+   RESPONSIVE
+   ===================================================== */
+
+@media (max-width: 800px) {
+
+    .app {
+        display: flex;
+        flex-direction: column;
+
+        height: auto;
+        min-height: 100vh;
+    }
+
+    aside {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+    }
+
+    main {
+        height: 65vh;
+        min-height: 430px;
+    }
+
+    #map {
+        flex: 1;
+        min-height: 0;
+    }
+
+    .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+
+        padding: 13px 16px;
+    }
+}
+
+/* =====================================================
+   END · FIREWATCH
+   ===================================================== */
