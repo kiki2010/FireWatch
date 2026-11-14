@@ -7,69 +7,41 @@
 
     <link rel="icon" href="assets/icon.png">
     <link rel="stylesheet" href="styles/style.css">
-    <link rel="stylesheet" href="styles/activity.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 </head>
 <body>
     <div class="app">
         <aside>
-            <div class="brand">
-                <div class="brand-mark">
-                    <img src="assets/icon.png" alt="FireWatch">
-                </div>
-                <div>
-                    <h1>MultiRiskᴬᴵ: FireWatch</h1>
-                </div>
-            </div>
-            
-            <h2>Área de análisis</h2>
-            <p>En base a las herramientas de dibujo en el mapa, selecciona una región.</p>
-            <div class="status">
-                <span class="dot"></span>
-                Mapa interactivo listo.
-            </div>
-            
-            <h2>Coordenadas</h2>
-            <div class="data-card">
-                <div class="data-label">
-                    Límites (Oeste, Sur, Este, Norte)
-                </div>
-                <div id="bounds" class="data-value empty">
-                    Todavía no hay un area seleccionada
-                </div>
-            </div>
-            <div class="data-card">
-                <div class="data-label">
-                    Geometría Seleccionada
-                </div>
-                <div id="geometry" class="data-value empty">
-                    Dibujá un área en el mapa
-                </div>
-            </div>
-            <div class="actions">
-                <button id="copy" class="primary" disabled> Copiar coordenadas</button>
-                <button id="clear" disabled>Limpiar</button>
-            </div>
+            <h1><img src="assets/icon.png" alt="" width="32" height="32"> MultiRiskᴬᴵ: FireWatch</h1>
 
-            <h2>Análisis de Incendios</h2>
-            <div class="data-card">
-                <div class="data-label">Fuente de datos</div>
-                <div class="data-value">NASA FIRMS · VIIRS / MODIS</div>
-            </div>
+            <!-- ÁREA -->
+            <section>
+                <h2>Área de análisis</h2>
+                <p>Dibujá un rectángulo o polígono en el mapa.</p>
+                <div class="card">
+                    <div id="bounds" class="empty">Todavía no hay un área seleccionada</div>
+                    <div id="geometry" class="empty">Dibujá un área en el mapa</div>
+                </div>
+                <div class="row">
+                    <button id="copy" class="primary" disabled>Copiar coordenadas</button>
+                    <button id="clear" disabled>Limpiar</button>
+                </div>
+            </section>
 
-            <div class="firms-controls">
-                <label for="sensor">Sensor satelital</label>
+            <!-- CONSULTA RÁPIDA -->
+            <details>
+                <summary>Consulta rápida (últimos días)</summary>
 
+                <label for="sensor">Sensor</label>
                 <select id="sensor">
-                    <option value="VIIRS_SNPP_NRT">VIIRS SNPP · Tiempo casi real</option>
-                    <option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20 · Tiempo casi real</option>
-                    <option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21 · Tiempo casi real</option>
-                    <option value="MODIS_NRT">MODIS · Tiempo casi real</option>
+                    <option value="VIIRS_SNPP_NRT">VIIRS SNPP</option>
+                    <option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20</option>
+                    <option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21</option>
+                    <option value="MODIS_NRT">MODIS</option>
                 </select>
 
-                <label for="dayRange">Período de consulta</label>
-
+                <label for="dayRange">Período</label>
                 <select id="dayRange">
                     <option value="1">Último día</option>
                     <option value="2">Últimos 2 días</option>
@@ -77,56 +49,34 @@
                     <option value="5">Últimos 5 días</option>
                 </select>
 
-                <button id="queryFirms" class="primary" disabled>
-                    Consultar NASA FIRMS
-                </button>
-            </div>
+                <button id="queryFirms" class="primary" disabled>Consultar NASA FIRMS</button>
 
-            <div class="data-card">
-                <div class="data-label">Estado de consulta</div>
-                <div id="firmsStatus" class="data-value empty">
-                    Esperando un área seleccionada
+                <div class="card">
+                    <div id="firmsStatus" class="empty">Esperando un área seleccionada</div>
+                    <div>Detecciones: <b id="firmsCount">0</b></div>
                 </div>
-            </div>
+                <button id="clearFirms" disabled>Limpiar detecciones</button>
+            </details>
 
-            <div class="data-card">
-                <div class="data-label">Detecciones encontradas</div>
-                <div id="firmsCount" class="data-value">0</div>
-            </div>
+            <!-- COMPARAR SENSORES -->
+            <details>
+                <summary>Comparar sensores</summary>
 
-            <div class="actions">
-                <button id="clearFirms" disabled>
-                    Limpiar detecciones
-                </button>
-            </div>
+                <p>El sensor A es el de "Consulta rápida".</p>
 
-            <h2>Análisis histórico</h2>
-            <div class="firms-controls">
-                <label for="startDate">Fecha inicio</label>
-                <input type="date" id="startDate" value="2022-07-01">
-
-                <label for="endDate">Fecha fin</label>
-                <input type="date" id="endDate" value="2024-11-30">
-
-                <button id="analyzeBtn" class="primary" disabled>Analizar período</button>
-            </div>
-
-            <div class="data-card">
-                <div class="data-label">Estado del análisis</div>
-                <div id="analysisStatus" class="data-value empty">Esperando un área seleccionada</div>
-            </div>
-
-            <div id="analysisResults"></div>
-
-            <h2>Comparar sensores</h2>
-            <div class="firms-controls">
-                <label for="sensorB">Sensor B (se compara contra el sensor de arriba)</label>
+                <label for="sensorB">Sensor B</label>
                 <select id="sensorB">
                     <option value="MODIS_NRT" selected>MODIS · Terra + Aqua</option>
                     <option value="VIIRS_SNPP_NRT">VIIRS SNPP</option>
                     <option value="VIIRS_NOAA20_NRT">VIIRS NOAA-20</option>
                     <option value="VIIRS_NOAA21_NRT">VIIRS NOAA-21</option>
                 </select>
+
+                <label for="startDate">Desde</label>
+                <input type="date" id="startDate" value="2022-07-01">
+
+                <label for="endDate">Hasta</label>
+                <input type="date" id="endDate" value="2024-11-30">
 
                 <label for="neighborRadius">Tolerancia espacial</label>
                 <select id="neighborRadius">
@@ -137,46 +87,31 @@
                 <label><input type="checkbox" id="filterStatic" checked> Excluir fuentes de calor persistentes</label>
 
                 <button id="compareBtn" class="primary" disabled>Comparar sensores</button>
-            </div>
+                <div id="compareResults" class="card empty">Esperando un área seleccionada</div>
 
-            <div class="data-card">
-                <div class="data-label">Resultado de la comparación</div>
-                <div id="compareResults" class="data-value empty">Esperando un área seleccionada</div>
-            </div>
+                <button id="validateBtn" disabled>Validar (sensibilidad + azar)</button>
+                <div id="validateResults" class="card empty">Ejecutá una comparación primero</div>
 
-            <!-- Validación: sensibilidad al tamaño de celda + control de azar -->
-            <div class="actions">
-                <button id="validateBtn" class="primary" disabled>Validar comparación (sensibilidad + azar)</button>
-            </div>
-
-            <div class="data-card">
-                <div class="data-label">Validación</div>
-                <div id="validateResults" class="data-value empty">Ejecutá una comparación primero</div>
-            </div>
-
-            <h2>Celdas armonizadas</h2>
-            <div class="firms-controls">
+                <h3>Celdas armonizadas</h3>
                 <label><input type="checkbox" id="showCells" checked> Mostrar celdas comparadas</label>
                 <label><input type="checkbox" id="showHotspots" checked> Mostrar detecciones originales</label>
 
-                <label for="cellDate">Fecha a visualizar</label>
-                <div class="actions">
+                <div class="row">
                     <button id="cellPrev" type="button" disabled>◀</button>
                     <select id="cellDate" disabled></select>
                     <button id="cellNext" type="button" disabled>▶</button>
                 </div>
-            </div>
 
-            <div class="data-card">
-                <div class="data-label">Resumen de la fecha</div>
-                <div id="cellSummary" class="data-value empty">Ejecutá una comparación para ver las celdas</div>
-            </div>
+                <div id="cellSummary" class="card empty">Ejecutá una comparación para ver las celdas</div>
+                <div id="cellLegend"></div>
+            </details>
 
-            <div id="cellLegend"></div>
+            <!-- CALENDARIO -->
+            <details open>
+                <summary>Calendario de actividad</summary>
 
-                        <h2>Calendario de actividad</h2>
-            <p>Actividad histórica (IAICD) del área dibujada, con MODIS y VIIRS armonizados.</p>
-            <div class="firms-controls">
+                <p>Actividad histórica (IAICD) del área, con MODIS y VIIRS armonizados.</p>
+
                 <label for="calStart">Desde</label>
                 <input type="date" id="calStart" value="2023-01-01">
 
@@ -185,29 +120,21 @@
 
                 <div id="calEstimate" class="act-hint"></div>
 
+                <label><input type="checkbox" id="calFilterStatic"> Excluir fuentes de calor persistentes</label>
+
                 <button id="calGenerate" class="primary" disabled>Generar calendario</button>
                 <button id="calOpen" type="button" disabled>Abrir calendario</button>
                 <button id="calImport" type="button">Importar calendario (JSON)</button>
                 <input type="file" id="calImportFile" accept="application/json,.json" hidden>
-            </div>
 
-            <div class="data-card">
-                <div class="data-label">Estado del calendario</div>
-                <div id="calStatus" class="data-value empty">Esperando un área seleccionada</div>
-            </div>
+                <div id="calStatus" class="card empty">Esperando un área seleccionada</div>
+            </details>
         </aside>
 
-        <main>
-            <div class="topbar">
-                <strong>Mapa Mundial</strong>
-                <span>Selecciona una región para comenzar el análisis</span>
-            </div>
-
-            <div id="map" aria-label="Mapa Mundial interactivo"></div>
-        </main>
+        <div id="map" aria-label="Mapa interactivo"></div>
     </div>
 
-        <!-- Calendario histórico (panel superpuesto) -->
+    <!-- Calendario histórico (panel superpuesto) -->
     <div id="actDrawer" class="act-drawer" role="dialog" aria-labelledby="actTitle" hidden>
         <div class="act-panel">
             <header class="act-header">
@@ -218,7 +145,7 @@
             <div id="actBanner" class="act-banner" hidden></div>
 
             <div class="act-toolbar">
-                <fieldset class="act-fieldset">
+                <fieldset>
                     <legend>Color según</legend>
                     <label><input type="radio" name="actMode" value="activity" checked> Actividad (IAICD)</label>
                     <label><input type="radio" name="actMode" value="anomaly"> Anomalía histórica</label>
@@ -242,28 +169,26 @@
                     <p id="actParamsMsg" class="act-hint" role="status"></p>
                 </details>
 
-                <div class="act-io">
-                    <button id="actExport" type="button" disabled>Exportar datos (JSON)</button>
-                </div>
+                <button id="actExport" type="button" disabled>Exportar datos (JSON)</button>
             </div>
 
             <div class="act-body">
                 <div>
-                    <div id="actCalendar" class="act-cal"></div>
+                    <div id="actCalendar"></div>
                     <div id="actLegend" class="act-legend"></div>
                 </div>
                 <div id="actDetail" class="act-detail" aria-live="polite"></div>
             </div>
-            
-            <section class="act-section">
+
+            <section>
                 <h3>Evolución mensual: observado vs. mediana histórica</h3>
-                <div id="actChart" class="act-chart"></div>
+                <div id="actChart"></div>
                 <div id="actChartLegend" class="act-legend"></div>
             </section>
 
-            <section id="actSummary" class="act-section"></section>
+            <section id="actSummary"></section>
 
-            <p class="act-footnote">
+            <p class="act-note">
                 IAICD = celdas de 1 km con al menos una detección (MODIS ∪ VIIRS) por día, sumadas en el mes.
                 Es un indicador experimental de actividad espacial detectada: no es el número de incendios,
                 ni superficie quemada, ni intensidad, y no calibra un sensor contra otro. Las anomalías son
@@ -273,7 +198,6 @@
         </div>
     </div>
 
-    <!-- Librerías externas: primero Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 

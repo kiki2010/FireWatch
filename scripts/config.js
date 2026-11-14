@@ -1,4 +1,3 @@
-
 // config.js
 
 const VERCEL_BASE = 'https://mr-firewatch.vercel.app';
