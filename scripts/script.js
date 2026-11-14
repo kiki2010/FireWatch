@@ -1,8 +1,13 @@
 // script.js
 // =====================================================================
 // Lógica principal de FireWatch: mapa, selección de AOI, consultas a
-// NASA FIRMS, análisis histórico, comparación de sensores y
-// visualización de celdas armonizadas.
+// NASA FIRMS, comparación de sensores y visualización de celdas
+// armonizadas.
+//
+// El análisis temporal histórico (cobertura, IAICD, anomalías) vive en
+// activity.js y calendar-ui.js. El "Análisis histórico" antiguo de este
+// archivo fue retirado: rellenaba con ceros, no distinguía "sin datos"
+// de 0 y calculaba el z-score incluyendo el mes evaluado.
 //
 // Orden de carga en index.html (obligatorio):
 //   1. config.js     -> define FIRMS_FUNCTION_URL
@@ -78,8 +83,6 @@ map.addControl(drawControl);
 // Estado de la aplicación.
 let selectedPayload = null;   // { bounds, geometry } del AOI actual
 let lastDetections = [];
-let lastDaily = [];
-let lastMonthly = [];
 
 // Datos de la última comparación (ya filtrados) para validar sin volver a descargar.
 let lastComparisonData = null;
@@ -106,19 +109,16 @@ const clearFirmsBtn = document.getElementById('clearFirms');
 const firmsStatus = document.getElementById('firmsStatus');
 const firmsCount = document.getElementById('firmsCount');
 
-// Análisis histórico.
+// Fechas (compartidas con la comparación de sensores).
 const startDateEl = document.getElementById('startDate');
 const endDateEl = document.getElementById('endDate');
-const analyzeBtn = document.getElementById('analyzeBtn');
-const analysisStatus = document.getElementById('analysisStatus');
-const analysisResults = document.getElementById('analysisResults');
 
 // Comparación de sensores.
 const sensorBSelect = document.getElementById('sensorB');
 const compareBtn = document.getElementById('compareBtn');
 const compareResults = document.getElementById('compareResults');
 
-// Visualización de celdas armonizadas (elementos NUEVOS en index.html).
+// Visualización de celdas armonizadas.
 const showCellsEl = document.getElementById('showCells');
 const showHotspotsEl = document.getElementById('showHotspots');
 const cellDateEl = document.getElementById('cellDate');
@@ -127,11 +127,11 @@ const cellNextBtn = document.getElementById('cellNext');
 const cellSummaryEl = document.getElementById('cellSummary');
 const cellLegendEl = document.getElementById('cellLegend');
 
-// Opciones de la comparación (elementos NUEVOS en index.html).
+// Opciones de la comparación.
 const neighborRadiusEl = document.getElementById('neighborRadius');
 const filterStaticEl = document.getElementById('filterStatic');
 
-// Validación (elementos NUEVOS en index.html).
+// Validación.
 const validateBtn = document.getElementById('validateBtn');
 const validateResultsEl = document.getElementById('validateResults');
 
@@ -146,16 +146,6 @@ const validateResultsEl = document.getElementById('validateResults');
 // Redondea a 5 decimales (~1 m) para mostrar coordenadas limpias.
 function rounded(value) {
     return Number(value.toFixed(5));
-}
-
-// Borra los resultados del análisis histórico.
-function clearAnalysis() {
-    lastDaily = [];
-    lastMonthly = [];
-    analysisResults.innerHTML = '';
-    analysisStatus.textContent = selectedPayload
-        ? 'Área lista para analizar'
-        : 'Esperando un área seleccionada';
 }
 
 // Se ejecuta cuando el usuario dibuja o edita un área.
@@ -193,12 +183,10 @@ function updateSelection(layer) {
     copyBtn.disabled = false;
     clearBtn.disabled = false;
     queryFirmsBtn.disabled = false;
-    analyzeBtn.disabled = false;
     compareBtn.disabled = false;
 
     // Evitar mostrar resultados de una selección anterior.
     clearFirmsData();
-    clearAnalysis();
 
     firmsStatus.textContent = 'Área lista para consultar Nasa FIRMS';
 }
@@ -222,11 +210,9 @@ function resetSelection() {
     copyBtn.disabled = true;
     clearBtn.disabled = true;
     queryFirmsBtn.disabled = true;
-    analyzeBtn.disabled = true;
     compareBtn.disabled = true;
 
     clearFirmsData();
-    clearAnalysis();
 
     firmsStatus.textContent = 'Esperando un área seleccionada';
 }
@@ -438,6 +424,9 @@ function productForDate(sensor, isoDate) {
 }
 
 // Descarga UN tramo, con reintentos si falla.
+// Solo se reintenta lo que puede arreglarse solo: errores de red y 5xx.
+// Los 4xx (incluido el 429 de límite de transacciones de FIRMS) NO se
+// reintentan: no se van a resolver y cada intento gasta cuota.
 async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
     const product = productForDate(sensor, chunk.startDate);
 
@@ -457,7 +446,9 @@ async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                throw new Error(result.error || 'Error al consultar NASA FIRMS');
+                const failure = new Error(result.error || 'Error al consultar NASA FIRMS');
+                failure.retryable = response.status >= 500;
+                throw failure;
             }
 
             return parseCSV(result.csv || '')
@@ -465,7 +456,7 @@ async function fetchFirmsChunk(bounds, sensor, chunk, retries = 2) {
                 .filter(Boolean);
 
         } catch (error) {
-            if (attempt >= retries) throw error;
+            if (error.retryable === false || attempt >= retries) throw error;
             // Espera creciente antes de reintentar.
             await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
         }
@@ -709,107 +700,20 @@ queryFirmsBtn.addEventListener('click', async () => {
 
 
 // =====================================================================
-// 13. ANÁLISIS HISTÓRICO (Harmonization Engine)
+// 13. ANÁLISIS HISTÓRICO LEGADO: RETIRADO
+// El análisis mensual antiguo (relleno con ceros, sin distinguir
+// "sin datos" de 0, z-score que incluía el mes evaluado) fue reemplazado
+// por el calendario IAICD de activity.js / calendar-ui.js, que separa
+// no-data / partial / full y calcula anomalías contra referencias
+// históricas. Para que no convivan dos metodologías en pantalla, se
+// ocultan los controles viejos si todavía existen en index.html.
+// (Una vez borrados del HTML, este bloque se puede eliminar.)
 // =====================================================================
-
-// Dibuja la tabla mensual con anomalías y z-score.
-function renderMonthlyTable(rows) {
-    if (rows.length === 0) {
-        analysisResults.innerHTML =
-            '<p>No hay meses completos en el rango elegido.</p>';
-        return;
-    }
-
-    const body = rows.map(r => {
-        const z = r.zscore === null ? '—' : r.zscore.toFixed(2);
-        const zClass = r.zscore === null ? '' : r.zscore > 0 ? 'z-pos' : 'z-neg';
-        return `<tr>
-            <td>${escapeHTML(r.month)}</td>
-            <td>${r.count}</td>
-            <td>${Math.round(r.baseline)}</td>
-            <td>${Math.round(r.anomaly)}</td>
-            <td class="${zClass}">${z}</td>
-            <td>${r.n}</td>
-        </tr>`;
-    }).join('');
-
-    analysisResults.innerHTML = `
-        <table class="result-table">
-            <thead><tr>
-                <th>Mes</th><th>Focos</th><th>Prom.</th><th>Anom.</th><th>Z</th><th>n</th>
-            </tr></thead>
-            <tbody>${body}</tbody>
-        </table>`;
-}
-
-analyzeBtn.addEventListener('click', async () => {
-    if (!selectedPayload) {
-        analysisStatus.textContent = 'Primero seleccioná un área en el mapa';
-        return;
-    }
-
-    const startDate = startDateEl.value;
-    const endDate = endDateEl.value;
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (!startDate || !endDate || startDate > endDate || endDate > today) {
-        analysisStatus.textContent = 'Revisá las fechas: inicio ≤ fin ≤ hoy';
-        return;
-    }
-
-    const sensor = sensorSelect.value;
-
-    // Recorta el inicio al día en que el sensor ya existía.
-    const range = resolveRange([sensor], startDate, endDate);
-    if (range.error) {
-        analysisStatus.textContent = range.error;
-        return;
-    }
-
-    analyzeBtn.disabled = true;
-    analysisResults.innerHTML = '';
-
-    try {
-        const detections = await fetchFirmsRange({
-            bounds: selectedPayload.bounds,
-            geometry: selectedPayload.geometry,
-            sensor,
-            startDate: range.startDate,
-            endDate,
-            onProgress: (done, total) => {
-                analysisStatus.textContent = `Descargando tramo ${done} de ${total}...`;
-            }
-        });
-
-        if (detections.length === 0) {
-            analysisStatus.textContent =
-                'Sin detecciones. Puede que el producto no cubra esas fechas (¿NRT vs SP?) o que el área no tenga focos.';
-            return;
-        }
-
-        // Diario -> mensual -> anomalías.
-        lastDaily = aggregateDaily(detections, range.startDate, endDate);
-        lastMonthly = aggregateMonthly(lastDaily);
-        const anomalies = seasonalAnomalies(lastMonthly);
-
-        renderMonthlyTable(anomalies);
-
-        const withZ = countWithZScore(anomalies);
-        analysisStatus.textContent =
-            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ` +
-            describeSensor(productForDate(sensor, range.startDate)) +
-            (productForDate(sensor, endDate) !== productForDate(sensor, range.startDate)
-                ? ` → ${productForDate(sensor, endDate)}`
-                : '') +
-            (range.notes.length ? ' · ' + range.notes.join(' ') : '') +
-            (withZ === 0 ? ' · Sin Z: se necesitan ≥3 años del mismo mes.' : '');
-
-    } catch (error) {
-        console.error('Error en análisis:', error);
-        analysisStatus.textContent = `Error: ${error.message}`;
-    } finally {
-        analyzeBtn.disabled = !selectedPayload;
-    }
+['analyzeBtn', 'analysisStatus', 'analysisResults'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = true;
+    el.style.display = 'none';
 });
 
 

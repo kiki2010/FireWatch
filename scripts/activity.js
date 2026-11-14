@@ -1,10 +1,10 @@
 // scripts/activity.js
 // =====================================================================
-// Bloque 3 · Lógica de actividad (SIN DOM).
+// Bloque 4 · Análisis temporal: lógica de actividad (SIN DOM).
 // Cargar DESPUÉS de harmonize.js y ANTES de script.js.
 //
 // Reutiliza de harmonize.js: harmonizeDetections, excludeCells,
-// SENSOR_META, addDaysISO, daysBetween, pearson.
+// findPersistentCells, SENSOR_META, addDaysISO, daysBetween, pearson.
 // Usa en tiempo de ejecución (definidas en script.js): fetchFirmsChunk,
 // buildChunks, productForDate, pointInGeometry.
 //
@@ -21,7 +21,18 @@ const ACTIVITY_CONFIG = {
     chunkDays: 5,
     provisionalDays: 2,        // últimos días: NRT todavía puede cambiar
     cacheMinAgeDays: 7,        // no se cachean tramos más recientes que esto
-    maxConsecutiveErrors: 6    // corta la descarga si FIRMS falla seguido
+    maxConsecutiveErrors: 6,   // corta la descarga si FIRMS falla seguido
+
+    // Filtro de fuentes de calor persistentes (chimeneas, hornos, quemas
+    // recurrentes). Es una decisión metodológica: documentar estos valores.
+    //   minEpisodes / maxGapDays: mismo criterio que findPersistentCells
+    //     (harmonize.js), aplicado dentro de CADA año.
+    //   minYears: una celda se excluye solo si es persistente en al menos
+    //     este número de años (o en todos, si hay menos años con datos).
+    //     Con una serie de muchos años, evaluar todo el período junto
+    //     marcaría como "persistente" a una celda forestal que simplemente
+    //     se quemó 4 veces en una década.
+    persistentFilter: { minEpisodes: 4, maxGapDays: 5, minYears: 2 }
 };
 
 // ---------------------------------------------------------------------
@@ -34,6 +45,9 @@ function median(values) {
     return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
+// "Hoy" en UTC, a propósito: las fechas de adquisición de FIRMS (acq_date)
+// son UTC, así que el último día que puede tener datos es el de hoy en UTC,
+// aunque en la zona horaria del usuario todavía sea el día anterior.
 function todayISO() {
     return new Date().toISOString().slice(0, 10);
 }
@@ -352,15 +366,83 @@ function buildHarmonizedDailySeries({
 }
 
 // ---------------------------------------------------------------------
+// FILTRO DE FUENTES PERSISTENTES PARA SERIES MULTIANUALES
+//
+// findPersistentCells (harmonize.js) cuenta "episodios" de una celda a lo
+// largo de TODO lo que recibe. Pensado para comparar sensores en un año,
+// aplicado a una década marcaría como persistente a cualquier celda con 4
+// incendios separados. Acá se evalúa año por año: una celda se excluye solo
+// si es persistente en `minYears` años distintos (o en todos los años con
+// datos, si hay menos). Un incendio grande o un par de eventos aislados no
+// alcanzan; una chimenea que reaparece cada año sí.
+//
+// Límites a declarar: un año con pocos meses cargados tiene menos
+// posibilidades de alcanzar `minEpisodes` (criterio conservador), y los
+// umbrales son una decisión metodológica.
+//
+// @param detectionSets  [detecciones[], detecciones[], ...] (uno por sensor)
+// @returns { cells: Set<cellId>, yearsEvaluated, requiredYears, params }
+// ---------------------------------------------------------------------
+function findPersistentCellsByYear(
+    detectionSets, referenceLat, cellSizeKm = ACTIVITY_CONFIG.cellSizeKm, options = {}
+) {
+    const cfg = { ...ACTIVITY_CONFIG.persistentFilter, ...options };
+
+    const years = new Set();
+    for (const set of detectionSets) {
+        for (const d of set) {
+            if (d.date) years.add(String(d.date).slice(0, 4));
+        }
+    }
+
+    const requiredYears = Math.max(1, Math.min(cfg.minYears, years.size));
+    const yearsByCell = new Map();       // cellId -> Set de años en que es persistente
+
+    for (const year of years) {
+        const prefix = `${year}-`;
+        const slice = detectionSets.map(set =>
+            set.filter(d => d.date && String(d.date).startsWith(prefix))
+        );
+
+        const flagged = findPersistentCells(slice, referenceLat, cellSizeKm, {
+            minEpisodes: cfg.minEpisodes,
+            maxGapDays: cfg.maxGapDays
+        });
+
+        for (const cellId of flagged) {
+            if (!yearsByCell.has(cellId)) yearsByCell.set(cellId, new Set());
+            yearsByCell.get(cellId).add(year);
+        }
+    }
+
+    const cells = new Set();
+    for (const [cellId, ys] of yearsByCell) {
+        if (ys.size >= requiredYears) cells.add(cellId);
+    }
+
+    return {
+        cells,
+        yearsEvaluated: years.size,
+        requiredYears,
+        params: { minEpisodes: cfg.minEpisodes, maxGapDays: cfg.maxGapDays, minYears: cfg.minYears }
+    };
+}
+
+// ---------------------------------------------------------------------
 // ORQUESTADOR (descarga ambos sensores y arma la serie).
 // Cada sensor se pide desde su propia fecha de inicio: los días previos
 // quedan SIN cobertura (null), no como ceros.
+//
+// filterPersistent: si es true, excluye las celdas de fuentes persistentes
+// (ver findPersistentCellsByYear) antes de armar la serie. El resultado
+// informa en meta.persistentFilter = { requested, applied, cells, ... }.
 // ---------------------------------------------------------------------
 async function runActivityPipeline({
     bounds, geometry, startDate, endDate,
     sensors = ACTIVITY_CONFIG.defaultSensors,
     cellSizeKm = ACTIVITY_CONFIG.cellSizeKm,
     excludeCellIds = null,
+    filterPersistent = false,
     onProgress
 }) {
     const today = todayISO();
@@ -419,14 +501,37 @@ async function runActivityPipeline({
         );
     }
 
+    const referenceLat = aoiReferenceLat(bounds);
+
+    // Celdas a excluir: las que pasó el llamador + (opcional) las persistentes.
+    let excluded = excludeCellIds ? new Set(excludeCellIds) : null;
+    let persistentFilter = { requested: Boolean(filterPersistent), applied: false, cells: 0 };
+
+    if (filterPersistent) {
+        const found = findPersistentCellsByYear(
+            Object.values(detectionsBySensor), referenceLat, cellSizeKm
+        );
+
+        excluded = new Set([...(excluded ?? []), ...found.cells]);
+        persistentFilter = {
+            requested: true,
+            applied: true,                       // el filtro corrió (aunque no halle celdas)
+            cells: found.cells.size,
+            cellIds: [...found.cells].sort().slice(0, 500),   // trazabilidad (tope 500)
+            yearsEvaluated: found.yearsEvaluated,
+            requiredYears: found.requiredYears,
+            params: found.params
+        };
+    }
+
     const { series, meta } = buildHarmonizedDailySeries({
         detectionsBySensor, coverage, startDate, endDate,
-        referenceLat: aoiReferenceLat(bounds), cellSizeKm, excludeCellIds
+        referenceLat, cellSizeKm, excludeCellIds: excluded
     });
 
     return {
         series,
-        meta: { ...meta, sensors, notes },
+        meta: { ...meta, sensors, notes, persistentFilter },
         fetchSummary: Object.fromEntries(fetchResults.map(r => [r.sensor, r.summary])),
         chunkReports: Object.fromEntries(fetchResults.map(r => [r.sensor, r.chunks]))
     };
@@ -1134,6 +1239,78 @@ function selfTestOverlap() {
             (() => { const e = evaluateSensorOverlap([]); return e.nMonths === 0 && e.shareBoth === null && e.correlationMonthly === null; })()],
         ['El orden "VIIRS+MODIS" también cuenta',
             evaluateSensorOverlap([mk('2023-01', 1, 1, 1, { sensorSet: 'VIIRS+MODIS' })]).nMonths === 1]
+    ];
+
+    console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));
+    return checks.every(c => c[1]);
+}
+
+// AUTOTEST (sin red). Uso en consola: selfTestPersistent()
+function selfTestPersistent() {
+    const lat0 = -31.42, lng0 = -64.50;     // celdas distintas: ≥ 4,7 km entre sí
+    const mk = (date, dLat, dLng, sensor = 'MODIS_SP') => ({
+        date, lat: lat0 + dLat, lng: lng0 + dLng, sensor,
+        instrument: SENSOR_META[sensor].instrument
+    });
+
+    // 4 episodios separados 20 días (> maxGapDays) dentro de un año.
+    const episodes = year => [`${year}-01-01`, `${year}-01-21`, `${year}-02-10`, `${year}-03-01`];
+    // 10 días seguidos = 1 solo episodio (un incendio grande).
+    const longFire = year => Array.from({ length: 10 }, (_, i) => addDaysISO(`${year}-07-01`, i));
+
+    const P = [0, 0];          // persistente: 4 episodios en 2020 y en 2021
+    const Q = [0.05, 0];       // 4 episodios solo en 2020
+    const F = [0, 0.05];       // incendio largo en 2020 y 2021 (1 episodio por año)
+
+    const detections = [];
+    for (const year of [2020, 2021]) {
+        for (const d of episodes(year)) detections.push(mk(d, P[0], P[1]));
+        for (const d of longFire(year)) detections.push(mk(d, F[0], F[1]));
+    }
+    for (const d of episodes(2020)) detections.push(mk(d, Q[0], Q[1]));
+
+    const cellOf = (dLat, dLng) => harmonizeDetections(
+        [mk('2020-01-01', dLat, dLng)], lat0, 1)[0].cellId;
+    const cP = cellOf(...P), cQ = cellOf(...Q), cF = cellOf(...F);
+
+    const A = findPersistentCellsByYear([detections], lat0, 1);
+
+    // Un solo año de datos: alcanza con serlo en ese año.
+    const oneYear = detections.filter(d => d.date.startsWith('2020-'));
+    const B = findPersistentCellsByYear([oneYear], lat0, 1);
+
+    // Varios sensores: la celda se marca si alguno la marca.
+    const viirs = [];
+    for (const year of [2020, 2021]) {
+        for (const d of episodes(year)) viirs.push(mk(d, 0.1, 0, 'VIIRS_SNPP_SP'));
+    }
+    const C = findPersistentCellsByYear([detections, viirs], lat0, 1);
+    const cV = cellOf(0.1, 0);
+
+    // Sin detecciones: no falla.
+    const D = findPersistentCellsByYear([[], []], lat0, 1);
+
+    // La exclusión saca solo las detecciones de las celdas marcadas.
+    const kept = excludeCells(detections, A.cells, lat0, 1);
+    const keptCells = new Set(harmonizeDetections(kept, lat0, 1).map(g => g.cellId));
+
+    // minYears configurable: con 3 años exigidos y solo 2 con datos, se exigen 2.
+    const E = findPersistentCellsByYear([detections], lat0, 1, { minYears: 3 });
+
+    const checks = [
+        ['Celda con 4 episodios en 2 años -> persistente', A.cells.has(cP)],
+        ['Celda con 4 episodios en un solo año (de 2) -> NO persistente', !A.cells.has(cQ)],
+        ['Incendio largo (1 episodio por año) -> NO persistente', !A.cells.has(cF)],
+        ['2 años evaluados y 2 exigidos', A.yearsEvaluated === 2 && A.requiredYears === 2],
+        ['Con un solo año de datos alcanza serlo en ese año (Q y P)',
+            B.requiredYears === 1 && B.cells.has(cP) && B.cells.has(cQ) && !B.cells.has(cF)],
+        ['Con varios sensores se marca si alguno la marca', C.cells.has(cV) && C.cells.has(cP)],
+        ['Sin detecciones: conjunto vacío, sin error',
+            D.cells.size === 0 && D.yearsEvaluated === 0 && D.requiredYears === 1],
+        ['excludeCells quita P y conserva Q y F',
+            !keptCells.has(cP) && keptCells.has(cQ) && keptCells.has(cF)],
+        ['minYears mayor que los años disponibles se limita a los años con datos',
+            E.requiredYears === 2 && E.cells.has(cP)]
     ];
 
     console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));

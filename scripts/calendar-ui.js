@@ -1,6 +1,6 @@
 // scripts/calendar-ui.js
 // =====================================================================
-// Bloque 3 · Etapas 5, 6 y 7 · Calendario histórico de actividad.
+// Bloque 3 · Calendario histórico de actividad (interfaz).
 // Cargar DESPUÉS de activity.js y script.js (ya está así en index.html).
 //
 // Usa de activity.js: runActivityPipeline, aggregateHarmonizedMonthly,
@@ -8,6 +8,19 @@
 //   ANOMALY_CATEGORY_LABELS, HISTORICAL_CONFIG, ACTIVITY_CONFIG, todayISO.
 // Usa de script.js: selectedPayload, map, escapeHTML.
 // Usa de harmonize.js: addDaysISO, daysBetween.
+//
+// CAMBIOS de esta versión (parches del bloque 3):
+//  1. La clave de caché del resultado incluye la GEOMETRÍA del AOI (antes
+//     solo la caja envolvente: editar un vértice interior reutilizaba el
+//     resultado del polígono anterior), el tamaño de celda y el filtro.
+//  2. Al cambiar el AOI se descarta el resultado cacheado.
+//  3. Opción "Excluir fuentes de calor persistentes" (checkbox opcional
+//     #calFilterStatic). Se pasa a runActivityPipeline como
+//     filterPersistent; el banner informa si de verdad se aplicó
+//     (meta.persistentFilter = { requested, applied, cells }).
+//  4. Exportación e importación incluyen la información del filtro.
+//  5. El panel atrapa el foco con Tab (accesibilidad) y evita que el
+//     fondo reciba foco mientras está abierto.
 // =====================================================================
 (() => {
     'use strict';
@@ -23,7 +36,8 @@
         below: $('actBelow'), above: $('actAbove'), exceptional: $('actExceptional'),
         paramsMsg: $('actParamsMsg'),
         chart: $('actChart'), chartLegend: $('actChartLegend'), summary: $('actSummary'),
-        exportBtn: $('actExport'), calImport: $('calImport'), calImportFile: $('calImportFile')
+        exportBtn: $('actExport'), calImport: $('calImport'), calImportFile: $('calImportFile'),
+        filterStatic: $('calFilterStatic')      // opcional (ver index.html)
     };
 
     if (!els.generate || !els.drawer || !els.table) {
@@ -161,6 +175,19 @@
     // -----------------------------------------------------------------
     // Render: banner, calendario, leyenda, detalle
     // -----------------------------------------------------------------
+    function persistentFilterText(s) {
+        const pf = s.persistentFilter;
+
+        if (pf?.applied) {
+            return `Filtro de fuentes persistentes: ${fmtN(pf.cells)} celda(s) excluida(s).`;
+        }
+        if (s.filterRequested) {
+            return '<b>Filtro de fuentes persistentes solicitado pero NO aplicado</b> ' +
+                   '(activity.js no informó el resultado del filtro: revisá que esté actualizado).';
+        }
+        return 'Filtro de fuentes persistentes: desactivado.';
+    }
+
     function renderBanner() {
         const s = state.source;
         if (!s) { els.banner.hidden = true; return; }
@@ -179,8 +206,10 @@
             html = `Datos importados de un archivo de FireWatch generado el ${esc(s.generatedAt ?? 'fecha desconocida')}. ` +
                    `Fuente declarada: ${esc(s.sourceText || 'no indicada')}${aoi}${range}. ` +
                    'No corresponde necesariamente al área dibujada ahora.';
+            if (s.persistentFilter) html += ' ' + persistentFilterText(s);
         } else {
-            html = `Fuente: NASA FIRMS · ${esc(ACTIVITY_CONFIG.defaultSensors.join(' + '))}${aoi}${range}.`;
+            html = `Fuente: NASA FIRMS · ${esc(ACTIVITY_CONFIG.defaultSensors.join(' + '))}${aoi}${range}. ` +
+                   persistentFilterText(s);
 
             const failed = Object.entries(s.fetchSummary || {})
                 .filter(([, x]) => x.error + x.skipped > 0);
@@ -652,6 +681,36 @@
         state.lastFocus?.focus?.();
     }
 
+    // Elementos enfocables visibles dentro del panel (para la trampa de foco).
+    function focusableInDrawer() {
+        return [...els.drawer.querySelectorAll(
+            'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'
+        )].filter(el => !el.disabled && el.getClientRects().length > 0);
+    }
+
+    // Con el panel abierto, Tab y Shift+Tab no salen de él.
+    function trapFocus(e) {
+        if (e.key !== 'Tab' || els.drawer.hidden) return;
+
+        const items = focusableInDrawer();
+        if (!items.length) { e.preventDefault(); return; }
+
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+
+        if (!els.drawer.contains(active)) {
+            e.preventDefault();
+            first.focus();
+        } else if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    }
+
     // -----------------------------------------------------------------
     // Controles de la barra lateral
     // -----------------------------------------------------------------
@@ -685,18 +744,31 @@
             (requests > 150 ? 'Consulta pesada: FIRMS limita las transacciones por ventana de 10 min; usá un área chica o un período más corto.' : '');
     }
 
+    // Se llama cuando cambia el AOI: el resultado cacheado ya no corresponde.
     function resetCalendar(message) {
         state.monthly = [];
         state.rows = [];
         state.annual = [];
         state.selected = null;
         state.source = null;
+        state.cacheKey = null;
+        state.cached = null;
         if (!els.drawer.hidden) closeDrawer();
         render();
         setStatus(message ?? (hasAoi()
             ? 'Área lista. Elegí el período y generá el calendario.'
             : 'Esperando un área seleccionada'), !hasAoi());
         updateEstimate();
+    }
+
+    // Clave del resultado cacheado. Incluye la GEOMETRÍA (no solo la caja
+    // envolvente), el tamaño de celda, los sensores y el filtro de fuentes
+    // persistentes: cualquier cambio en alguno de ellos invalida el resultado.
+    function makeCacheKey(payload, startDate, endDate, filterPersistent) {
+        return JSON.stringify([
+            payload.bounds, payload.geometry, startDate, endDate,
+            ACTIVITY_CONFIG.cellSizeKm, ACTIVITY_CONFIG.defaultSensors, filterPersistent
+        ]);
     }
 
     // -----------------------------------------------------------------
@@ -710,6 +782,7 @@
         const payload = selectedPayload;
         const startDate = els.start.value;
         const endDate = els.end.value;
+        const filterPersistent = Boolean(els.filterStatic?.checked);
 
         if (!startDate || !endDate || startDate > endDate || endDate > todayISO()) {
             setStatus('Revisá las fechas: inicio ≤ fin ≤ hoy');
@@ -728,8 +801,7 @@
         refreshControls();
 
         try {
-            const key = JSON.stringify([payload.bounds, startDate, endDate,
-                ACTIVITY_CONFIG.cellSizeKm, ACTIVITY_CONFIG.defaultSensors]);
+            const key = makeCacheKey(payload, startDate, endDate, filterPersistent);
 
             let result = state.cacheKey === key ? state.cached : null;
 
@@ -740,6 +812,7 @@
                     bounds: payload.bounds,
                     geometry: payload.geometry,
                     startDate, endDate,
+                    filterPersistent,
                     onProgress: (sensor, done, total) =>
                         setStatus(`Descargando ${sensor}: tramo ${done} de ${total}…`)
                 });
@@ -769,7 +842,9 @@
                 start: result.meta.startDate,
                 end: result.meta.endDate,
                 notes: result.meta.notes,
-                fetchSummary: result.fetchSummary
+                fetchSummary: result.fetchSummary,
+                filterRequested: filterPersistent,
+                persistentFilter: result.meta.persistentFilter ?? null
             };
 
             recompute();
@@ -878,6 +953,7 @@
     els.drawer.addEventListener('click', e => { if (e.target === els.drawer) closeDrawer(); });
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && !els.drawer.hidden) closeDrawer();
+        trapFocus(e);
     });
 
     els.start.addEventListener('change', updateEstimate);
@@ -931,6 +1007,8 @@
             period: { start: src.start ?? `${first}-01`, end: src.end ?? `${last}-01` },
             sensors: ACTIVITY_CONFIG.defaultSensors,
             cellSizeKm: ACTIVITY_CONFIG.cellSizeKm,
+            // Campo opcional (versión 1 sigue siendo válida sin él).
+            persistentFilter: src.persistentFilter ?? null,
             monthly: state.monthly
         };
 
@@ -985,6 +1063,16 @@
         return o;
     }
 
+    // Lee el bloque opcional persistentFilter de un archivo importado.
+    function sanitizePersistentFilter(pf) {
+        if (!pf || typeof pf !== 'object') return null;
+        return {
+            requested: Boolean(pf.requested),
+            applied: Boolean(pf.applied),
+            cells: Number.isInteger(pf.cells) && pf.cells >= 0 ? pf.cells : null
+        };
+    }
+
     async function importData(file) {
         try {
             if (file.size > 20e6) throw new Error('Archivo demasiado grande (máximo 20 MB).');
@@ -1001,6 +1089,8 @@
             state.monthly = monthly;
             state.annual = aggregateHarmonizedAnnual([], monthly);     // sin serie diaria: celdas únicas = N/D
             state.selected = null;
+            state.cacheKey = null;
+            state.cached = null;
             state.source = {
                 imported: true,
                 synthetic: Boolean(f.synthetic),
@@ -1008,7 +1098,9 @@
                 sourceText: typeof f.source === 'string' ? f.source.slice(0, 200) : '',
                 bounds,
                 start: ISO.test(f.period?.start ?? '') ? f.period.start : null,
-                end: ISO.test(f.period?.end ?? '') ? f.period.end : null
+                end: ISO.test(f.period?.end ?? '') ? f.period.end : null,
+                persistentFilter: sanitizePersistentFilter(f.persistentFilter),
+                filterRequested: Boolean(f.persistentFilter?.requested)
             };
 
             recompute();
