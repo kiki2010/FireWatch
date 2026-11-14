@@ -15,7 +15,9 @@
     <div class="app">
         <aside>
             <div class="brand">
-                <div class="brand-mark"></div>
+                <div class="brand-mark">
+                    <img src="assets/icon.png" alt="FireWatch">
+                </div>
                 <div>
                     <h1>MultiRiskᴬᴵ: FireWatch</h1>
                 </div>
@@ -171,6 +173,28 @@
             </div>
 
             <div id="cellLegend"></div>
+
+                        <h2>Calendario de actividad</h2>
+            <p>Actividad histórica (IAICD) del área dibujada, con MODIS y VIIRS armonizados.</p>
+            <div class="firms-controls">
+                <label for="calStart">Desde</label>
+                <input type="date" id="calStart" value="2023-01-01">
+
+                <label for="calEnd">Hasta</label>
+                <input type="date" id="calEnd">
+
+                <div id="calEstimate" class="act-hint"></div>
+
+                <button id="calGenerate" class="primary" disabled>Generar calendario</button>
+                <button id="calOpen" type="button" disabled>Abrir calendario</button>
+                <button id="calImport" type="button">Importar calendario (JSON)</button>
+                <input type="file" id="calImportFile" accept="application/json,.json" hidden>
+            </div>
+
+            <div class="data-card">
+                <div class="data-label">Estado del calendario</div>
+                <div id="calStatus" class="data-value empty">Esperando un área seleccionada</div>
+            </div>
         </aside>
 
         <main>
@@ -181,6 +205,72 @@
 
             <div id="map" aria-label="Mapa Mundial interactivo"></div>
         </main>
+    </div>
+
+        <!-- Calendario histórico (panel superpuesto) -->
+    <div id="actDrawer" class="act-drawer" role="dialog" aria-labelledby="actTitle" hidden>
+        <div class="act-panel">
+            <header class="act-header">
+                <h2 id="actTitle">Calendario histórico de actividad</h2>
+                <button id="actClose" type="button" aria-label="Cerrar calendario">✕</button>
+            </header>
+
+            <div id="actBanner" class="act-banner" hidden></div>
+
+            <div class="act-toolbar">
+                <fieldset class="act-fieldset">
+                    <legend>Color según</legend>
+                    <label><input type="radio" name="actMode" value="activity" checked> Actividad (IAICD)</label>
+                    <label><input type="radio" name="actMode" value="anomaly"> Anomalía histórica</label>
+                </fieldset>
+
+                <details class="act-params">
+                    <summary>Parámetros de anomalía</summary>
+                    <label>Años de referencia mínimos
+                        <input type="number" id="actMinYears" min="3" max="30" value="5"></label>
+                    <label>Referencia
+                        <select id="actRefMode">
+                            <option value="previous" selected>Solo años anteriores</option>
+                            <option value="all-other">Todos los otros años cargados</option>
+                        </select></label>
+                    <label>Inferior si anomalía &lt;
+                        <input type="number" id="actBelow" value="-25"> %</label>
+                    <label>Superior si anomalía &gt;
+                        <input type="number" id="actAbove" value="25"> %</label>
+                    <label>Excepcional si anomalía &gt;
+                        <input type="number" id="actExceptional" value="100"> %</label>
+                    <p id="actParamsMsg" class="act-hint" role="status"></p>
+                </details>
+
+                <div class="act-io">
+                    <button id="actExport" type="button" disabled>Exportar datos (JSON)</button>
+                </div>
+            </div>
+
+            <div class="act-body">
+                <div>
+                    <div id="actCalendar" class="act-cal"></div>
+                    <div id="actLegend" class="act-legend"></div>
+                </div>
+                <div id="actDetail" class="act-detail" aria-live="polite"></div>
+            </div>
+            
+            <section class="act-section">
+                <h3>Evolución mensual: observado vs. mediana histórica</h3>
+                <div id="actChart" class="act-chart"></div>
+                <div id="actChartLegend" class="act-legend"></div>
+            </section>
+
+            <section id="actSummary" class="act-section"></section>
+
+            <p class="act-footnote">
+                IAICD = celdas de 1 km con al menos una detección (MODIS ∪ VIIRS) por día, sumadas en el mes.
+                Es un indicador experimental de actividad espacial detectada: no es el número de incendios,
+                ni superficie quemada, ni intensidad, y no calibra un sensor contra otro. Las anomalías son
+                estadísticas respecto de los años cargados; no predicen incendios. Las categorías las define
+                FireWatch (configurables) y no son categorías oficiales de NASA.
+            </p>
+        </div>
     </div>
 
     <!-- Librerías externas: primero Leaflet -->

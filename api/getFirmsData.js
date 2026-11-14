@@ -154,11 +154,15 @@ module.exports = async function handler(req, res) {
     const csv = await firmsResponse.text();
 
     if (!firmsResponse.ok) {
-      console.error("NASA FIRMS respondió con un error", firmsResponse.status);
+      console.error("NASA FIRMS respondió con un error", firmsResponse.status, csv.slice(0, 200));
 
-      return res.status(502).json({
+      const limited = /transaction_limit|current_transactions/i.test(csv);
+
+      return res.status(limited ? 429 : 502).json({
         success: false,
-        error: "No se pudieron obtener los datos de NASA FIRMS.",
+        error: limited
+          ? "Límite de transacciones de NASA FIRMS alcanzado (ventana de 10 minutos). Esperá unos minutos."
+          : "No se pudieron obtener los datos de NASA FIRMS.",
         upstreamStatus: firmsResponse.status,
       });
     }
@@ -170,9 +174,13 @@ module.exports = async function handler(req, res) {
     if (!looksLikeCsv) {
       console.error("NASA FIRMS devolvió un contenido inesperado:", csv.slice(0, 200));
 
-      return res.status(502).json({
+      const limited = /transaction_limit|current_transactions/i.test(csv);
+
+      return res.status(limited ? 429 : 502).json({
         success: false,
-        error: "NASA FIRMS devolvió una respuesta inesperada: " + csv.slice(0, 120),
+        error: limited
+          ? "Límite de transacciones de NASA FIRMS alcanzado (ventana de 10 minutos). Esperá unos minutos."
+          : "NASA FIRMS devolvió una respuesta inesperada: " + csv.slice(0, 120),
       });
     }
 

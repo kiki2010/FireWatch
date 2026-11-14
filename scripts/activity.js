@@ -4,7 +4,7 @@
 // Cargar DESPUÉS de harmonize.js y ANTES de script.js.
 //
 // Reutiliza de harmonize.js: harmonizeDetections, excludeCells,
-// SENSOR_META, addDaysISO, daysBetween.
+// SENSOR_META, addDaysISO, daysBetween, pearson.
 // Usa en tiempo de ejecución (definidas en script.js): fetchFirmsChunk,
 // buildChunks, productForDate, pointInGeometry.
 //
@@ -124,7 +124,11 @@ async function fetchFirmsRangeWithCoverage({
             } catch (error) {
                 report[i].status = 'error';
                 report[i].error = error.message;
-                if (++consecutiveErrors >= ACTIVITY_CONFIG.maxConsecutiveErrors) {
+                consecutiveErrors++;
+
+                // Límite de transacciones de FIRMS: insistir solo empeora el bloqueo.
+                const rateLimited = /transaction|l[ií]mite|inesperada|502/i.test(error.message);
+                if (rateLimited || consecutiveErrors >= ACTIVITY_CONFIG.maxConsecutiveErrors) {
                     aborted = true;
                 }
             }
@@ -402,8 +406,17 @@ async function runActivityPipeline({
     }
 
     const coverage = coverageByInstrument(fetchResults);
-    if (Object.keys(coverage).length === 0) {
-        throw new Error('Ningún sensor tiene cobertura en el rango pedido.');
+    const hasCoverage = Object.values(coverage).some(s => s.size > 0);
+
+    if (!hasCoverage) {
+        const firstError = fetchResults
+            .flatMap(r => r.chunks)
+            .find(c => c.status === 'error')?.error;
+
+        throw new Error(
+            'No se pudo descargar ningún tramo de FIRMS.' +
+            (firstError ? ` Primer error: ${firstError}` : ' Revisá el rango y los sensores.')
+        );
     }
 
     const { series, meta } = buildHarmonizedDailySeries({
@@ -562,6 +575,11 @@ function aggregateHarmonizedMonthly(series) {
             complete,
             state,
             sensorSet,
+            // Instrumentos con cobertura en TODOS los días presentes en la serie
+            // (sirve para meses incompletos y para el mes en curso).
+            sensorSetObserved: instruments
+                .filter(i => _instDays[i] === m.daysInSeries)
+                .join('+'),
             iaicd: hasData ? m.iaicd : null,
             maxDaily: hasData ? m.maxDaily : null,
             meanDaily: hasData ? m.iaicd / daysCovered : null,
@@ -696,6 +714,426 @@ function selfTestMonthly() {
             annual[0].monthsComplete === 2 && annual[0].monthsIncomplete === 1 && annual[0].monthsNoData === 1],
         ['Anual 2024: total de meses completos = 5, celdas únicas = 4, no comparable',
             annual[0].iaicdCompleteMonths === 5 && annual[0].uniqueCells === 4 && annual[0].comparable === false]
+    ];
+
+    console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));
+    return checks.every(c => c[1]);
+}
+
+// =====================================================================
+// ETAPA 4 · MEDIANA HISTÓRICA Y ANOMALÍAS
+// Entrada: filas de aggregateHarmonizedMonthly().
+//
+// Reglas:
+// - La referencia de un mes usa SOLO el mismo mes de otros años, con mes
+//   completo y el MISMO conjunto de sensores (evita discontinuidades).
+// - El año analizado nunca entra en su propia referencia.
+// - Mes incompleto / en curso: se comparan los MISMOS días del mes en los
+//   años de referencia (y el resultado se marca provisional).
+// - Sin suficientes años, o con mediana 0, no se inventa un porcentaje.
+// - Es una anomalía ESTADÍSTICA respecto de los años cargados.
+//   No es una predicción de incendios.
+// =====================================================================
+const HISTORICAL_CONFIG = {
+    minReferenceYears: 5,
+    // 'previous'  : solo años anteriores al analizado (por defecto).
+    // 'all-other' : todos los demás años cargados (incluye posteriores).
+    referenceMode: 'previous',
+    // Umbrales sobre la anomalía porcentual. Definidos por FireWatch,
+    // configurables; NO son categorías oficiales de NASA.
+    //   < belowPct                  -> inferior a la habitual
+    //   belowPct..abovePct          -> cercana a la habitual
+    //   abovePct..exceptionalPct    -> superior a la habitual
+    //   > exceptionalPct            -> excepcionalmente elevada
+    thresholds: { belowPct: -25, abovePct: 25, exceptionalPct: 100 }
+};
+
+const ANOMALY_CATEGORY_LABELS = {
+    below: 'Inferior a la habitual',
+    normal: 'Cercana a la habitual',
+    above: 'Superior a la habitual',
+    exceptional: 'Excepcionalmente elevada'
+};
+
+function classifyAnomaly(pct, thresholds = HISTORICAL_CONFIG.thresholds) {
+    if (!Number.isFinite(pct)) return null;
+    if (pct < thresholds.belowPct) return 'below';
+    if (pct <= thresholds.abovePct) return 'normal';
+    if (pct <= thresholds.exceptionalPct) return 'above';
+    return 'exceptional';
+}
+
+// ---------------------------------------------------------------------
+// Compara UN mes (target) contra su referencia histórica en `monthly`.
+// status: 'ok' | 'no-observation' | 'no-sensors' |
+//         'insufficient-years' | 'zero-median'
+// ---------------------------------------------------------------------
+function calculateHistoricalMedian(monthly, target, options = {}) {
+    if (!Array.isArray(monthly) || !target) {
+        throw new TypeError('calculateHistoricalMedian(monthly, target, options): faltan argumentos');
+    }
+
+    const cfg = {
+        ...HISTORICAL_CONFIG,
+        ...options,
+        thresholds: { ...HISTORICAL_CONFIG.thresholds, ...(options.thresholds || {}) }
+    };
+    const t = cfg.thresholds;
+
+    if (!(t.belowPct < t.abovePct && t.abovePct < t.exceptionalPct)) {
+        throw new RangeError('Umbrales inválidos: se exige belowPct < abovePct < exceptionalPct');
+    }
+    if (!Number.isInteger(cfg.minReferenceYears) || cfg.minReferenceYears < 1) {
+        throw new RangeError('minReferenceYears debe ser un entero >= 1');
+    }
+
+    const out = {
+        status: null, reason: null, note: null,
+        provisional: !target.complete,
+        comparison: null, comparedDays: null,
+        observed: null, median: null, difference: null,
+        anomalyPct: null, category: null,
+        referenceYears: [], nReference: 0,
+        minRequired: cfg.minReferenceYears,
+        sensorSet: null, referenceMode: cfg.referenceMode
+    };
+
+    if (target.iaicd === null) {
+        out.status = 'no-observation';
+        out.reason = 'Mes sin datos: no hay actividad observada para comparar (no equivale a actividad cero).';
+        return out;
+    }
+
+    const targetSet = target.complete ? target.sensorSet : (target.sensorSetObserved ?? '');
+    out.sensorSet = targetSet || null;
+
+    if (!targetSet) {
+        out.status = 'no-sensors';
+        out.reason =
+            'Ningún instrumento tiene cobertura continua en los días disponibles de este mes; ' +
+            'no se compara para no mezclar conjuntos de sensores distintos.';
+        return out;
+    }
+
+    // Días a comparar: mes completo -> todos; incompleto -> los días con valor.
+    let dayIdx = null;
+    if (!target.complete) {
+        dayIdx = [];
+        target.dailyIaicd.forEach((v, i) => { if (v !== null) dayIdx.push(i); });
+    }
+
+    const sumDays = (arr, idx) => idx.reduce((s, i) => s + (arr[i] ?? 0), 0);
+
+    out.comparison = dayIdx ? 'equivalent-days' : 'full-month';
+    out.comparedDays = dayIdx ? dayIdx.length : target.expectedDays;
+    out.observed = dayIdx ? sumDays(target.dailyIaicd, dayIdx) : target.iaicd;
+
+    // Referencia: mismo mes, otro año, completo y con el mismo conjunto de sensores.
+    const refs = [];
+    for (const r of monthly) {
+        if (r.monthNum !== target.monthNum || r.year === target.year) continue;
+        if (cfg.referenceMode === 'previous' && r.year > target.year) continue;
+        if (!r.complete || r.iaicd === null) continue;
+        if (r.sensorSet !== targetSet) continue;
+
+        let value = r.iaicd;
+        if (dayIdx) {
+            if (dayIdx.some(i => i >= r.expectedDays)) continue;
+            value = sumDays(r.dailyIaicd, dayIdx);
+        }
+        refs.push({ year: r.year, value });
+    }
+
+    refs.sort((a, b) => a.year - b.year);
+    out.referenceYears = refs.map(r => r.year);
+    out.nReference = refs.length;
+
+    if (refs.length < cfg.minReferenceYears) {
+        out.status = 'insufficient-years';
+        out.reason =
+            `Hay ${refs.length} año(s) de referencia válidos del mismo mes y con los mismos sensores; ` +
+            `se necesitan al menos ${cfg.minReferenceYears}. No se declara anomalía.`;
+        return out;
+    }
+
+    out.median = median(refs.map(r => r.value));
+    out.difference = out.observed - out.median;
+
+    if (out.median === 0) {
+        out.status = 'zero-median';
+        out.reason =
+            'La mediana histórica es 0: el porcentaje de anomalía no está definido ' +
+            '(división por cero). Se informa solo la diferencia absoluta.';
+        return out;
+    }
+
+    out.anomalyPct = (out.difference / out.median) * 100;
+    out.category = classifyAnomaly(out.anomalyPct, t);
+    out.status = 'ok';
+
+    if (out.provisional) {
+        out.note =
+            `Resultado provisional: mes incompleto. Se comparan los mismos ${out.comparedDays} ` +
+            'días del mes en cada año de referencia.';
+    }
+    return out;
+}
+
+// Devuelve una copia de cada fila mensual con su campo `historical`.
+function annotateHistorical(monthly, options = {}) {
+    return monthly.map(m => ({ ...m, historical: calculateHistoricalMedian(monthly, m, options) }));
+}
+
+// ---------------------------------------------------------------------
+// AUTOTEST (sin red). Uso en consola: selfTestHistorical()
+// ---------------------------------------------------------------------
+function selfTestHistorical() {
+    const mk = (year, monthNum, {
+        daily = {}, complete = true, sensorSet = 'MODIS+VIIRS',
+        daysInSeries = null, noData = false
+    } = {}) => {
+        const expectedDays = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+        const n = daysInSeries ?? expectedDays;
+        const dailyIaicd = new Array(expectedDays).fill(null);
+        if (!noData) for (let i = 0; i < n; i++) dailyIaicd[i] = daily[i + 1] ?? 0;
+        const iaicd = noData ? null : dailyIaicd.reduce((s, v) => s + (v ?? 0), 0);
+
+        return {
+            month: `${year}-${String(monthNum).padStart(2, '0')}`,
+            year, monthNum, expectedDays, daysInSeries: n,
+            complete, provisional: !complete, iaicd,
+            state: noData ? 'no-data' : !complete ? 'incomplete'
+                : iaicd === 0 ? 'complete-zero' : 'complete-active',
+            sensorSet: complete ? sensorSet : '',
+            sensorSetObserved: noData ? '' : sensorSet,
+            dailyIaicd
+        };
+    };
+
+    const june = (year, value, extra = {}) => mk(year, 6, { daily: { 5: value }, ...extra });
+    const refs = [10, 20, 30, 40, 50].map((v, i) => june(2019 + i, v));   // mediana 30
+
+    const target = june(2024, 45);
+    const A = calculateHistoricalMedian([...refs, target], target);
+
+    const later = june(2025, 1000);
+    const B1 = calculateHistoricalMedian([...refs, target, later], target);
+    const B2 = calculateHistoricalMedian([...refs, target, later], target, { referenceMode: 'all-other' });
+
+    const C = calculateHistoricalMedian(refs.slice(0, 3), target);
+
+    const zeroRefs = [0, 0, 0, 0, 0].map((v, i) => june(2019 + i, v));
+    const D = calculateHistoricalMedian(zeroRefs, june(2024, 7));
+
+    const badSensors = june(2017, 999, { sensorSet: 'MODIS' });
+    const badIncomplete = june(2018, 999, { complete: false });
+    const E = calculateHistoricalMedian([...refs, badSensors, badIncomplete], target);
+
+    const F = calculateHistoricalMedian(refs, mk(2024, 6, { noData: true }));
+
+    // Mes en curso: 13 días con valor; los años de referencia tienen además 100 el día 20.
+    const refsWithTail = [10, 20, 30, 40, 50].map((v, i) => mk(2019 + i, 6, { daily: { 5: v, 20: 100 } }));
+    const current = mk(2024, 6, { daily: { 5: 45 }, complete: false, daysInSeries: 13 });
+    const G = calculateHistoricalMedian(refsWithTail, current);
+
+    const H = obs => calculateHistoricalMedian(refs, june(2024, obs));
+    const I = calculateHistoricalMedian(refs, target, { thresholds: { abovePct: 60 } });
+    const J = calculateHistoricalMedian(refs.slice(0, 3), target, { minReferenceYears: 3 });
+
+    let threw = false;
+    try { calculateHistoricalMedian(refs, target, { thresholds: { abovePct: -50 } }); }
+    catch (e) { threw = e instanceof RangeError; }
+
+    const sixRefs = [10, 20, 30, 40, 50, 60].map((v, i) => june(2018 + i, v));
+    const L = calculateHistoricalMedian(sixRefs, june(2025, 35));
+
+    const input = [...refs, target];
+    const M = annotateHistorical(input);
+
+    const checks = [
+        ['Mediana de junio = 30 y el 2024 no entra en su referencia',
+            A.status === 'ok' && A.median === 30 && !A.referenceYears.includes(2024)],
+        ['Diferencia = 15 y anomalía = +50 %', A.difference === 15 && Math.abs(A.anomalyPct - 50) < 1e-9],
+        ['5 años de referencia; categoría "superior"', A.nReference === 5 && A.category === 'above'],
+        ['Modo "previous": un año posterior no entra', B1.nReference === 5 && B1.median === 30],
+        ['Modo "all-other": el año posterior sí entra', B2.nReference === 6 && B2.median === 35],
+        ['Pocos años -> insufficient-years, sin mediana ni porcentaje',
+            C.status === 'insufficient-years' && C.median === null && C.anomalyPct === null && C.category === null],
+        ['Mediana 0 -> zero-median, sin porcentaje, con diferencia',
+            D.status === 'zero-median' && D.anomalyPct === null && D.difference === 7],
+        ['Referencias incompletas o con otros sensores se excluyen',
+            E.nReference === 5 && E.median === 30],
+        ['Mes sin datos -> no-observation, sin valor observado',
+            F.status === 'no-observation' && F.observed === null],
+        ['Mes en curso: compara los mismos 13 días (mediana 30, +50 %)',
+            G.status === 'ok' && G.comparison === 'equivalent-days' && G.comparedDays === 13 &&
+            G.median === 30 && Math.abs(G.anomalyPct - 50) < 1e-9],
+        ['Mes en curso marcado provisional', G.provisional === true && typeof G.note === 'string'],
+        ['+233 % -> excepcionalmente elevada', H(100).category === 'exceptional'],
+        ['-66,7 % -> inferior a la habitual', H(10).category === 'below'],
+        ['0 % -> cercana a la habitual', H(30).category === 'normal'],
+        ['Umbral configurable: +50 % es "cercana" si abovePct = 60', I.category === 'normal'],
+        ['minReferenceYears configurable (3 años alcanzan)', J.status === 'ok' && J.nReference === 3],
+        ['Umbrales desordenados lanzan RangeError', threw],
+        ['Mediana con cantidad par de años = 35', L.median === 35 && L.anomalyPct === 0],
+        ['annotateHistorical no muta la entrada',
+            M.every(m => m.historical) && input.every(m => m.historical === undefined)]
+    ];
+
+    console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));
+    return checks.every(c => c[1]);
+}
+
+// =====================================================================
+// ETAPA 7 · SOLAPAMIENTO MODIS-VIIRS Y AUDITORÍA
+// =====================================================================
+
+// Evalúa el solapamiento usando SOLO meses completos con ambos instrumentos.
+// Todo se mide en celdas-día (misma grilla y mismo AOI). Describe cómo se
+// comportan los dos sensores en esta área; NO es una calibración.
+function evaluateSensorOverlap(monthly) {
+    const done = monthly.filter(m => m.complete && m.iaicd !== null);
+
+    const setCounts = {};
+    for (const m of done) setCounts[m.sensorSet] = (setCounts[m.sensorSet] || 0) + 1;
+
+    const used = done.filter(m => {
+        const s = m.sensorSet.split('+');
+        return s.includes('MODIS') && s.includes('VIIRS');
+    });
+
+    const sum = k => used.reduce((acc, m) => acc + (m[k] ?? 0), 0);
+    const div = (a, b) => (b > 0 ? a / b : null);
+
+    const onlyM = sum('cellDaysOnlyModis');
+    const onlyV = sum('cellDaysOnlyViirs');
+    const both = sum('cellDaysBoth');
+    const total = onlyM + onlyV + both;
+    const withM = onlyM + both;
+    const withV = onlyV + both;
+
+    return {
+        nMonths: used.length,
+        setCounts,
+        cellDays: total,
+        shareOnlyModis: div(onlyM, total),
+        shareOnlyViirs: div(onlyV, total),
+        shareBoth: div(both, total),
+        coverageOfModisByViirs: div(both, withM),
+        coverageOfViirsByModis: div(both, withV),
+        jaccard: div(both, total),
+        unionOverModis: div(total, withM),
+        unionOverViirs: div(total, withV),
+        correlationMonthly: used.length >= 3
+            ? pearson(
+                used.map(m => m.cellDaysOnlyModis + m.cellDaysBoth),
+                used.map(m => m.cellDaysOnlyViirs + m.cellDaysBoth))
+            : null
+    };
+}
+
+// Auditoría de un resultado REAL. Uso: auditActivityResult(act)
+function auditActivityResult(act, params = {}) {
+    const { series, monthly } = act ?? {};
+    if (!Array.isArray(series) || !Array.isArray(monthly)) {
+        throw new TypeError('auditActivityResult(act): faltan act.series y act.monthly');
+    }
+
+    const annotated = annotateHistorical(monthly, params);
+    const byKey = new Map(monthly.map(m => [m.month, m]));
+    const sum = a => a.reduce((s, v) => s + v, 0);
+    const pad = n => String(n).padStart(2, '0');
+    const expectedLen = series.length
+        ? daysBetween(series[0].date, series[series.length - 1].date) + 1 : 0;
+
+    const checks = [
+        ['Serie continua: un día tras otro, sin saltos ni repetidos',
+            series.length === expectedLen &&
+            series.every((d, i) => i === 0 || daysBetween(series[i - 1].date, d.date) === 1)],
+        ['Sin datos -> IAICD null; con cobertura -> entero >= 0',
+            series.every(d => d.status === 'no-data'
+                ? d.iaicd === null : Number.isInteger(d.iaicd) && d.iaicd >= 0)],
+        ['IAICD diario = solo M + solo V + ambos = celdas únicas',
+            series.every(d => d.iaicd === null ||
+                (d.iaicd === d.onlyModis + d.onlyViirs + d.both && d.iaicd === d.cells.length))],
+        ['Ninguna celda repetida dentro de un mismo día',
+            series.every(d => new Set(d.cells.map(c => c[0])).size === d.cells.length)],
+        ['Total mensual = total diario',
+            sum(monthly.map(m => m.iaicd ?? 0)) === sum(series.map(d => d.iaicd ?? 0))],
+        ['dailyIaicd de cada mes suma su IAICD',
+            monthly.every(m => m.iaicd === null
+                ? m.dailyIaicd.every(v => v === null)
+                : sum(m.dailyIaicd.filter(v => v !== null)) === m.iaicd)],
+        ['La procedencia exclusiva suma el IAICD',
+            monthly.every(m => m.iaicd === null ||
+                m.cellDaysOnlyModis + m.cellDaysOnlyViirs + m.cellDaysBoth === m.iaicd)],
+        ['Meses completos: sin días sin datos, parciales ni provisionales',
+            monthly.filter(m => m.complete)
+                .every(m => m.daysNoData === 0 && m.daysPartial === 0 && !m.provisional)],
+        ['Meses sin datos: IAICD null y sin comparación',
+            annotated.filter(m => m.state === 'no-data')
+                .every(m => m.iaicd === null && m.historical.status === 'no-observation' &&
+                    m.historical.anomalyPct === null)],
+        ['Mediana 0 -> sin porcentaje (no se divide por cero)',
+            annotated.every(m => m.historical.median !== 0 || m.historical.anomalyPct === null)],
+        ['Ningún año analizado figura en su propia referencia',
+            annotated.every(m => !m.historical.referenceYears.includes(m.year))],
+        ['Referencias: mismo mes, completo y mismo conjunto de sensores',
+            annotated.every(m => {
+                const want = m.complete ? m.sensorSet : m.sensorSetObserved;
+                return m.historical.referenceYears.every(y => {
+                    const r = byKey.get(`${y}-${pad(m.monthNum)}`);
+                    return r && r.complete && r.sensorSet === want;
+                });
+            })],
+        ['Anomalía declarada solo con los años mínimos',
+            annotated.every(m => m.historical.status !== 'ok' ||
+                m.historical.nReference >= m.historical.minRequired)],
+        ['Porcentaje de anomalía solo si hay mediana válida',
+            annotated.every(m => m.historical.anomalyPct === null ||
+                (m.historical.status === 'ok' && Number.isFinite(m.historical.median)))]
+    ];
+
+    console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));
+    return checks.every(c => c[1]);
+}
+
+// AUTOTEST (sin red). Uso en consola: selfTestOverlap()
+function selfTestOverlap() {
+    const mk = (month, oM, oV, b, extra = {}) => ({
+        month, complete: true, sensorSet: 'MODIS+VIIRS', iaicd: oM + oV + b,
+        cellDaysOnlyModis: oM, cellDaysOnlyViirs: oV, cellDaysBoth: b, ...extra
+    });
+
+    const monthly = [
+        mk('2023-01', 6, 2, 2),
+        mk('2023-02', 12, 4, 4),
+        mk('2023-03', 3, 1, 1),
+        mk('2011-06', 9, 0, 0, { sensorSet: 'MODIS' }),
+        mk('2023-04', 50, 50, 50, { complete: false })
+    ];
+    const ov = evaluateSensorOverlap(monthly);
+    const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+    const checks = [
+        ['Solo entran meses completos con ambos instrumentos', ov.nMonths === 3 && ov.cellDays === 35],
+        ['Procedencia: 60 % solo MODIS, 20 % solo VIIRS, 20 % ambos',
+            near(ov.shareOnlyModis, 0.6) && near(ov.shareOnlyViirs, 0.2) && near(ov.shareBoth, 0.2)],
+        ['Las tres participaciones suman 100 %',
+            near(ov.shareOnlyModis + ov.shareOnlyViirs + ov.shareBoth, 1)],
+        ['Cobertura: VIIRS ve 25 % de MODIS; MODIS ve 50 % de VIIRS',
+            near(ov.coverageOfModisByViirs, 0.25) && near(ov.coverageOfViirsByModis, 0.5)],
+        ['Jaccard de celda-día = 20 %', near(ov.jaccard, 0.2)],
+        ['Unión / solo MODIS = 1,25 y unión / solo VIIRS = 2,5',
+            near(ov.unionOverModis, 1.25) && near(ov.unionOverViirs, 2.5)],
+        ['Correlación mensual = 1 (series proporcionales)', near(ov.correlationMonthly, 1)],
+        ['Conjuntos de sensores contados solo en meses completos',
+            ov.setCounts['MODIS+VIIRS'] === 3 && ov.setCounts['MODIS'] === 1 &&
+            Object.keys(ov.setCounts).length === 2],
+        ['Sin meses evaluables: nulos, sin error',
+            (() => { const e = evaluateSensorOverlap([]); return e.nMonths === 0 && e.shareBoth === null && e.correlationMonthly === null; })()],
+        ['El orden "VIIRS+MODIS" también cuenta',
+            evaluateSensorOverlap([mk('2023-01', 1, 1, 1, { sensorSet: 'VIIRS+MODIS' })]).nMonths === 1]
     ];
 
     console.table(checks.map(([prueba, ok]) => ({ prueba, resultado: ok ? 'OK' : 'FALLA' })));
