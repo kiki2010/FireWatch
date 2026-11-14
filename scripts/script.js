@@ -796,7 +796,11 @@ analyzeBtn.addEventListener('click', async () => {
 
         const withZ = countWithZScore(anomalies);
         analysisStatus.textContent =
-            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ${describeSensor(sensor)}` +
+            `Listo · ${detections.length} detecciones · ${lastDaily.length} días · ` +
+            describeSensor(productForDate(sensor, range.startDate)) +
+            (productForDate(sensor, endDate) !== productForDate(sensor, range.startDate)
+                ? ` → ${productForDate(sensor, endDate)}`
+                : '') +
             (range.notes.length ? ' · ' + range.notes.join(' ') : '') +
             (withZ === 0 ? ' · Sin Z: se necesitan ≥3 años del mismo mes.' : '');
 
@@ -962,11 +966,15 @@ compareBtn.addEventListener('click', async () => {
         setupHarmonizedView(spatial);
 
         // Guardar los datos ya filtrados para el botón de validación.
+        // startDate/endDate permiten que el control de azar desplace B de
+        // forma circular dentro del período (ver chanceControl en harmonize.js).
         lastComparisonData = {
             detectionsA: resultA.detections,
             detectionsB: resultB.detections,
             referenceLat,
-            cellSizeKm
+            cellSizeKm,
+            startDate: range.startDate,
+            endDate
         };
         if (validateBtn) validateBtn.disabled = false;
         if (validateResultsEl) {
@@ -1132,19 +1140,31 @@ function renderValidation(sens, chance) {
         <td>${pct(r.tolDice)}</td>
     </tr>`).join('');
 
-    const chanceRow = (label, c) => c
-        ? `<tr>
+    // p mínimo alcanzable = 1 / (1 + nº de desplazamientos). Si el observado
+    // supera a TODOS los nulos, p vale exactamente ese piso: se informa como
+    // "≤ piso" y no como un valor exacto. No se muestra z: con un nulo pegado
+    // a cero (desvío ≈ 0) el cociente da valores enormes sin interpretación.
+    const chanceRow = (label, c) => {
+        if (!c) {
+            return `<tr><td>${label}</td><td colspan="4">N/D (sin actividad o período demasiado corto)</td></tr>`;
+        }
+
+        const minP = 1 / (1 + c.nShifts);
+        const pText = c.pValue <= minP + 1e-12
+            ? `≤ ${minP.toFixed(3)}`
+            : c.pValue.toFixed(3);
+
+        return `<tr>
             <td>${label}</td>
             <td>${pct(c.observed)}</td>
             <td>${pct(c.nullMean)} ± ${pct(c.nullStd)}</td>
             <td>${pct(c.nullMax)}</td>
-            <td>${num(c.z)}</td>
-            <td>${c.pValue.toFixed(3)}</td>
-        </tr>`
-        : `<tr><td>${label}</td><td colspan="5">N/D (sin actividad)</td></tr>`;
+            <td>${pText}</td>
+        </tr>`;
+    };
 
     const t = chance.tolerantDice;
-    let verdict = 'No se pudo evaluar el azar con estos datos.';
+    let verdict = 'No se pudo evaluar el azar con estos datos (período demasiado corto o sin actividad).';
     if (t) {
         verdict = t.pValue < 0.05
             ? 'La coincidencia con tolerancia supera lo esperable por alineación casual (p < 0,05).'
@@ -1165,11 +1185,13 @@ function renderValidation(sens, chance) {
         <hr>
 
         <b>Control de azar</b>
-        (celda de ${chance.cellSizeKm} km, B desplazada ${chance.minShift}–${chance.maxShift} días,
-        ${chance.shiftsUsed} desplazamientos)
+        ${chance.shiftsUsed === 0
+            ? `(período demasiado corto: se necesitan al menos ${2 * chance.minShift + 1} días para desplazar B ${chance.minShift} días en ambos sentidos)`
+            : `(celda de ${chance.cellSizeKm} km, B desplazada ${chance.minShift}–${chance.maxShift} días${chance.circular ? ' (circular)' : ''},
+        ${chance.shiftsUsed} desplazamientos)`}
         <table class="result-table">
             <thead><tr>
-                <th>Métrica</th><th>Obs.</th><th>Azar</th><th>Máx.</th><th>z</th><th>p</th>
+                <th>Métrica</th><th>Obs.</th><th>Azar</th><th>Máx.</th><th>p</th>
             </tr></thead>
             <tbody>
                 ${chanceRow('Dice exacto', chance.exactDice)}
@@ -1191,7 +1213,9 @@ validateBtn?.addEventListener('click', () => {
         return;
     }
 
-    const { detectionsA, detectionsB, referenceLat, cellSizeKm } = lastComparisonData;
+    const {
+        detectionsA, detectionsB, referenceLat, cellSizeKm, startDate, endDate
+    } = lastComparisonData;
 
     validateBtn.disabled = true;
     validateResultsEl.classList.remove('empty');
@@ -1202,7 +1226,9 @@ validateBtn?.addEventListener('click', () => {
         try {
             const sens = sensitivityByCellSize(detectionsA, detectionsB, referenceLat);
             const chance = chanceControl(detectionsA, detectionsB, referenceLat, cellSizeKm, {
-                neighborRadius: Number(neighborRadiusEl?.value ?? 1)
+                neighborRadius: Number(neighborRadiusEl?.value ?? 1),
+                startDate,
+                endDate
             });
 
             renderValidation(sens, chance);

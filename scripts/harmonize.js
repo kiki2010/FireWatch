@@ -673,8 +673,29 @@ function compareSpatialDetections(detectionsA, detectionsB, referenceLat, cellSi
 // ---------------------------------------------------------------------
 
 // Copia las detecciones desplazando su fecha `days` días (puede ser negativo).
+// Desplazamiento LINEAL: lo que sale del período se pierde. Se conserva
+// por compatibilidad; el control de azar usa la versión circular de abajo.
 function shiftDetections(detections, days) {
     return detections.map(d => (d.date ? { ...d, date: addDaysISO(d.date, days) } : d));
+}
+
+// Desplazamiento CIRCULAR dentro de [startDate, endDate]: lo que sale por
+// un extremo reentra por el otro, así B nunca pierde detecciones y la
+// distribución nula no queda artificialmente baja.
+// Las detecciones fuera del período se dejan sin tocar.
+function shiftDetectionsCircular(detections, days, startDate, endDate) {
+    const length = daysBetween(startDate, endDate) + 1;
+
+    return detections.map(d => {
+        if (!d.date) return d;
+
+        const offset = daysBetween(startDate, d.date);
+        if (offset < 0 || offset >= length) return d;
+
+        // Módulo que funciona también con desplazamientos negativos.
+        const newOffset = (((offset + days) % length) + length) % length;
+        return { ...d, date: addDaysISO(startDate, newOffset) };
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -720,12 +741,29 @@ function sensitivityByCellSize(detectionsA, detectionsB, referenceLat, sizes = [
 //
 //   pValue = (1 + #{nulos >= observado}) / (1 + N)
 //
+// DESPLAZAMIENTO CIRCULAR: si se pasan startDate y endDate en options,
+// lo que sale por un extremo del período reentra por el otro. Sin esto,
+// B perdería detecciones al desplazarse fuera del rango de A y el azar
+// quedaría subestimado (p-value optimista). Con período corto, maxShift
+// se limita a la mitad del período; si queda menor que minShift no hay
+// desplazamientos y el resultado es null (N/D) en vez de un valor falso.
+//
 // Limitaciones: conserva la estacionalidad aproximada (los incendios
 // se agrupan en agosto-septiembre), lo que hace la prueba conservadora.
-// No prueba precisión de detección, solo alineación temporal.
+// Los desplazamientos consecutivos no son independientes, así que el
+// p-value es aproximado. No prueba precisión de detección, solo
+// alineación temporal.
 // ---------------------------------------------------------------------
 function chanceControl(detectionsA, detectionsB, referenceLat, cellSizeKm = 1, options = {}) {
-    const { neighborRadius = 1, minShift = 10, maxShift = 60 } = options;
+    const { neighborRadius = 1, minShift = 10, startDate = null, endDate = null } = options;
+    let maxShift = options.maxShift ?? 60;
+
+    const circular = Boolean(startDate && endDate);
+    if (circular) {
+        const length = daysBetween(startDate, endDate) + 1;
+        // Con ±k y k <= (L-1)/2 no se repiten desplazamientos equivalentes.
+        maxShift = Math.min(maxShift, Math.floor((length - 1) / 2));
+    }
 
     const metrics = (a, b) => {
         const r = compareSpatialDetections(a, b, referenceLat, cellSizeKm, { neighborRadius });
@@ -737,7 +775,10 @@ function chanceControl(detectionsA, detectionsB, referenceLat, cellSizeKm = 1, o
     const nulls = [];
     for (let k = minShift; k <= maxShift; k++) {
         for (const sign of [-1, 1]) {
-            nulls.push(metrics(detectionsA, shiftDetections(detectionsB, sign * k)));
+            const shifted = circular
+                ? shiftDetectionsCircular(detectionsB, sign * k, startDate, endDate)
+                : shiftDetections(detectionsB, sign * k);
+            nulls.push(metrics(detectionsA, shifted));
         }
     }
 
@@ -757,7 +798,8 @@ function chanceControl(detectionsA, detectionsB, referenceLat, cellSizeKm = 1, o
             nullStd,
             nullMax: Math.max(...vals),
             z: nullStd > 0 ? (obs - nullMean) / nullStd : null,
-            pValue: (1 + vals.filter(v => v >= obs).length) / (1 + vals.length)
+            pValue: (1 + vals.filter(v => v >= obs).length) / (1 + vals.length),
+            nShifts: vals.length
         };
     };
 
@@ -766,6 +808,7 @@ function chanceControl(detectionsA, detectionsB, referenceLat, cellSizeKm = 1, o
         neighborRadius,
         minShift,
         maxShift,
+        circular,
         shiftsUsed: nulls.length,
         exactDice: summarize('dice'),
         tolerantDice: summarize('tolDice'),
