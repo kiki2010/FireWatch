@@ -1,3 +1,170 @@
+> [!NOTE]
+> This is the English version of the FireWatch README.
+
+# FireWatch
+## Wildfire monitoring, satellite data harmonization, and temporal pattern analysis.
+
+**Try the project:** https://mr-firewatch.vercel.app/
+
+[![NASA Space Apps Challenge](https://img.shields.io/badge/NASA-Space%20Apps%20Challenge-blue)](https://www.spaceappschallenge.org/)
+![Hackatime Badge](https://hackatime.hackclub.com/api/v1/badge/U07D93G63E1/kiki2010/FireWatch)
+
+FireWatch is a web application for wildfire monitoring and analysis that uses satellite data from NASA FIRMS (Fire Information for Resource Management System) to identify, visualize, compare, and analyze historical fire activity across different geographic regions.
+
+## The Problem
+
+Wildfires are a major environmental challenge. Understanding their behavior requires analyzing not only where they occur, but also how they evolve over time and how they are geographically distributed, identifying historical patterns to improve future decision-making.
+
+NASA FIRMS provides information from different satellite instruments, including MODIS and VIIRS. However, these sensors have different spatial resolutions, observation characteristics, and numbers of detections.
+
+This creates several challenges:
+
+- **Sensor differences:** MODIS and VIIRS may record different numbers of detections over the same region.
+- **Comparison difficulties:** Directly comparing their records can lead to inconsistent interpretations.
+- **Temporal fragmentation:** Analyzing individual detections makes it difficult to identify activity patterns over extended periods.
+- **Geographic interpretation:** Large volumes of records require tools that make it easier to identify concentrations and recurring patterns.
+
+Historical records must be transformed into organized and comparable information to better understand wildfire activity.
+
+## The Solution
+
+FireWatch integrates and harmonizes MODIS and VIIRS records to provide a more comprehensive view of thermal activity within a region.
+
+Its functionality combines five main capabilities:
+
+1. **Geographic monitoring:** Visualization of satellite detections on an interactive map.
+2. **Data integration:** Retrieval of records from MODIS and VIIRS sensors.
+3. **Spatial harmonization:** Organization of detections into a common geographic structure.
+4. **Comparative analysis:** Identification of overlaps, differences, and statistical indicators between sensors.
+5. **Temporal analysis:** Study of activity over time and identification of patterns across selected periods.
+
+FireWatch is more than a hotspot visualizer: it is an analytical tool. Active cell-days are compared on a common grid, "no data" is distinguished from "no activity," and every result is accompanied by controls indicating how reliable it is.
+
+FireWatch aims to take advantage of MODIS and VIIRS records together, while making their limitations transparent.
+
+## How It Works
+
+The application allows users to select a geographic region and retrieve satellite-recorded activity. Based on that selection, the data is processed and presented through maps, comparisons, and historical calendars.
+
+### 1. Region Selection
+
+Users draw a rectangle or polygon on the map to define the area they want to study.
+
+![Area selection](docs/images/01-seleccion-area.jpeg)
+
+### 2. Satellite Data Retrieval
+
+Users select the sensors, dates, and query parameters. FireWatch retrieves the corresponding records from NASA FIRMS.
+
+### 3. Sensor Comparison
+
+MODIS and VIIRS records are organized into a common 1 km geographic grid, making it possible to identify overlaps and differences between both sensors.
+
+### 4. Results Visualization
+
+Overlaps and differences are represented on the map using colors:
+
+- Green: Detection shared by both sensors.
+- Orange: Detection exclusive to sensor A.
+- Blue: Detection exclusive to sensor B.
+
+### 5. Analysis Validation
+
+FireWatch allows users to verify how results change when modifying cell size and to perform statistical checks to evaluate the observed overlaps.
+
+![Validation: monthly evolution](docs/images/05-validacion.jpeg)
+
+![Validation: annual summary and MODIS–VIIRS overlap](docs/images/05-validacion2.jpeg)
+
+### 6. Historical Calendar
+
+The application generates a calendar showing recorded activity over an extended period. It allows users to identify periods of increased activity, consult statistics, and detect anomalies compared to previous years.
+
+![Historical calendar](docs/images/06-calendario-historico.jpeg)
+
+## How We Built It (48-Hour Development)
+
+Development was organized into five work blocks, each focused on a different part of FireWatch's functionality.
+
+### Block 1 — Map and Data Acquisition
+
+Creation of the application, configuration of the interactive map, and connection to NASA FIRMS to retrieve satellite detections.
+
+**Files:**
+- `index.html`
+- `style.css`
+- `script.js`
+- `config.js`
+- `api/getFirmsData.js`
+
+### Block 2 — Harmonization and Comparison
+
+Development of the system that organizes MODIS and VIIRS records into a common grid, identifies overlaps, and calculates comparison indicators.
+
+**Files:**
+- `harmonize.js`
+- `script.js`
+
+### Block 3 — Historical Analysis
+
+Implementation of the IAICD indicator (active cell-days), processing of daily, monthly, and yearly records, and detection of historical anomalies.
+
+**Files:**
+- `activity.js`
+- `harmonize.js`
+
+![Block 3](docs/images/bloque-3-analisis.jpeg)
+
+### Block 4 — Results Visualization
+
+Integration of the analyses into the interface, incorporating map data layers, date selectors, charts, statistics, and a historical calendar.
+
+**Files:**
+- `script.js`
+- `calendar-ui.js`
+- `index.html`
+- `style.css`
+
+![Block 4](docs/images/bloque-4-interfaz.jpeg)
+
+### Block 5 — Validation and Final Integration
+
+Functionality testing, statistical checks, bug fixes, and interface simplification to ensure a clear and reproducible demonstration.
+
+**Files:**
+- `harmonize.js`
+- `activity.js`
+- `script.js`
+- `calendar-ui.js`
+
+## Technologies and Tools
+
+- **HTML, CSS, and JavaScript:** Web application development.
+- **Leaflet:** Interactive mapping and geographic visualization.
+- **NASA FIRMS:** Satellite data source.
+- **MODIS and VIIRS:** Instruments used to detect thermal activity.
+- **Vercel:** Application hosting and backend execution.
+- **Node.js:** Processing of requests to NASA FIRMS.
+
+## Results and Limitations
+
+In the first validation, conducted over a pilot region for 214 days, the following results were obtained:
+
+- 11 exact matches out of 81 cell-days.
+- Jaccard index: 13.6%.
+- Dice coefficient with a 3×3 neighborhood tolerance: 59.8%.
+- Jaccard index using 3 km cells: 29.3%.
+- Randomness control: All 102 tests produced overlap values below the observed result.
+
+These results show that some of the differences between sensors may be related to grid resolution, and that their temporal alignment was greater than what would be expected by chance.
+
+---
+
+**FireWatch — Transforming satellite data into information to understand wildfire activity.**
+
+---
+> [!NOTE]
+> This is the Spanish version of the FireWatch README.
 
 # FireWatch
 ## Monitoreo de incendios forestales, armonización de datos satelitales y análisis de patrones temporales.
